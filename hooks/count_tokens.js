@@ -159,141 +159,65 @@ async function findJsonlFiles(dir) {
   return files;
 }
 
-async function getAllUnsubmittedUsage(trackingData = {}, limit = 10) {
-  const claudePaths = getClaudePaths();
-  if (claudePaths.length === 0) {
-    return [];
-  }
-  
-  const allFiles = [];
-  for (const claudePath of claudePaths) {
-    const claudeDir = path.join(claudePath, CLAUDE_PROJECTS_DIR_NAME);
-    try {
-      const files = await findJsonlFiles(claudeDir);
-      allFiles.push(...files);
-    } catch (error) {
-      continue;
-    }
-  }
-  
-  if (allFiles.length === 0) {
-    return [];
-  }
-  
-  const sortedFiles = await sortFilesByTimestamp(allFiles);
-  const unsubmittedEntries = [];
-  const processedHashes = new Set();
-  
-  // Check recent files for unsubmitted entries
-  for (const file of sortedFiles.slice(0, 50)) { // Check up to 50 files
-    if (unsubmittedEntries.length >= limit) break;
-    
-    try {
-      const content = await readFile(file, 'utf-8');
-      const lines = content.trim().split('\n').filter(line => line.length > 0);
-      
-      // Process lines in chronological order (oldest first)
-      for (const line of lines) {
-        if (unsubmittedEntries.length >= limit) break;
-        
-        const usageData = parseUsageFromLine(line);
-        if (!usageData) continue;
-        
-        const uniqueHash = usageData.interaction_id;
-        
-        // Skip if no ID, already processed in this scan, or already submitted
-        if (!uniqueHash || processedHashes.has(uniqueHash) || trackingData[uniqueHash]) {
-          continue;
-        }
-        
-        processedHashes.add(uniqueHash);
-        unsubmittedEntries.push(usageData);
-      }
-    } catch (error) {
-      continue;
-    }
-  }
-  
-  console.error(`[DEBUG] Found ${unsubmittedEntries.length} unsubmitted entries`);
-  return unsubmittedEntries;
-}
-
 async function getLatestTokenUsage() {
   const claudePaths = getClaudePaths();
-  console.error(`Claude paths found: ${claudePaths.join(', ')}`);
+  console.error(`[DEBUG] Claude paths found: ${claudePaths.join(', ')}`);
   if (claudePaths.length === 0) {
-    console.error('No Claude paths found');
+    console.error('[DEBUG] No Claude paths found');
     return null;
   }
   
+  // Load tracking data to check what's already submitted
+  const trackingData = await loadTracking();
   
   const allFiles = [];
   for (const claudePath of claudePaths) {
     const claudeDir = path.join(claudePath, CLAUDE_PROJECTS_DIR_NAME);
-    console.error(`[DEBUG] Searching for JSONL files in: ${claudeDir}`);
     try {
       const files = await findJsonlFiles(claudeDir);
-      console.error(`[DEBUG] Found ${files.length} files in ${claudeDir}`);
-      if (files.length > 0) {
-        console.error(`[DEBUG] Sample files: ${files.slice(0, 3).join(', ')}`);
-      }
       allFiles.push(...files);
     } catch (error) {
-      console.error(`[DEBUG] Error searching in ${claudeDir}: ${error.message}`);
       continue;
     }
   }
   
   if (allFiles.length === 0) {
-    console.error(`No JSONL files found in paths: ${claudePaths.join(', ')}`);
+    console.error(`[DEBUG] No JSONL files found`);
     return null;
   }
   
-  console.error(`Found ${allFiles.length} JSONL files`);
-  console.error(`First few files: ${allFiles.slice(0, 3).join(', ')}`);
+  console.error(`[DEBUG] Found ${allFiles.length} JSONL files`);
   
-  
+  // Sort files by timestamp (newest first)
   const sortedFiles = await sortFilesByTimestamp(allFiles);
   
-  
-  const processedHashes = new Set();
-  const maxFilesToCheck = 20; // Check more files
-  const filesToCheck = sortedFiles.slice(0, maxFilesToCheck);
-  
-  console.error(`[DEBUG] Checking ${filesToCheck.length} most recent files out of ${sortedFiles.length} total`);
-  
-  for (const file of filesToCheck) {
+  // Look for the latest unsubmitted entry
+  for (const file of sortedFiles) {
     try {
       const content = await readFile(file, 'utf-8');
       const lines = content.trim().split('\n').filter(line => line.length > 0);
-      
-      console.error(`[DEBUG] File ${path.basename(file)} has ${lines.length} lines`);
       
       // Process lines in reverse order (newest first)
       for (const line of lines.reverse()) {
         const usageData = parseUsageFromLine(line);
-        if (!usageData) continue;
+        if (!usageData || !usageData.interaction_id) continue;
         
-        const uniqueHash = usageData.interaction_id;
-        if (uniqueHash && processedHashes.has(uniqueHash)) {
-          continue;
+        // Check if already submitted
+        if (trackingData[usageData.interaction_id]) {
+          continue; // Skip already submitted entries
         }
         
-        if (uniqueHash) {
-          processedHashes.add(uniqueHash);
-        }
-        
-        // Return the first valid, non-duplicate usage found
-        console.error(`[DEBUG] Found valid usage data in file ${path.basename(file)}`);
+        // Found an unsubmitted entry
+        console.error(`[DEBUG] Found unsubmitted entry: ${usageData.interaction_id} in ${path.basename(file)}`);
         return usageData;
       }
     } catch (error) {
-      console.error(`[DEBUG] Error reading/parsing file ${file}: ${error.message}`);
+      console.error(`[DEBUG] Error reading file ${file}: ${error.message}`);
       continue;
     }
   }
   
-  console.error(`[DEBUG] No valid usage data found after checking ${filesToCheck.length} files`);
+  console.error(`[DEBUG] No unsubmitted usage data found`);
   return null;
 }
 
@@ -463,97 +387,35 @@ async function sendToAPI(endpoint, payload, maxRetries = 3) {
 
 async function main() {
   try {
-    console.error(`[DEBUG] ====== Hook execution started ======`);
-    console.error(`[DEBUG] Script path: ${process.argv[1]}`);
-    console.error(`[DEBUG] Process ID: ${process.pid}`);
-    console.error(`[DEBUG] Node version: ${process.version}`);
+    // SIMPLIFIED APPROACH: Only read from JSONL files (matching ccusage behavior)
+    // - No stdin processing to avoid double-counting
+    // - No backlog processing to keep it simple
+    // - Only submit the latest unsubmitted entry
+    // - Use tracking file to prevent re-submissions
     
-    // Also log to file to verify hook is running
-    const logFile = path.join(USER_HOME_DIR, '.claude', 'hook_debug.log');
-    const logEntry = `[${new Date().toISOString()}] Hook started - PID: ${process.pid} CWD: ${process.cwd()}\n`;
-    await readFile(logFile, 'utf-8').catch(() => '').then(async (content) => {
-      await writeFile(logFile, content + logEntry);
-    });
+    // Load configuration first
+    const config = await loadConfig();
     
-
-    // Read hook data from stdin (Claude passes data via stdin)
-    let hookData = null;
-    let usageData = null;
-    
-    try {
-      const stdin = process.stdin;
-      stdin.setEncoding('utf-8');
-      let data = '';
-      for await (const chunk of stdin) {
-        data += chunk;
-      }
-      if (data.trim()) {
-        hookData = JSON.parse(data);
-        console.error(`[DEBUG] Received hook data from stdin: ${JSON.stringify(hookData)}`);
-        
-        // Parse usage data from stdin if available
-        if (hookData && hookData.message && hookData.message.usage) {
-          const usage = hookData.message.usage;
-          const interactionId = hookData.requestId || hookData.message?.id || null;
-          
-          usageData = {
-            timestamp: hookData.timestamp || new Date().toISOString(),
-            tokens: {
-              input: usage.input_tokens || 0,
-              output: usage.output_tokens || 0,
-              cache_creation: usage.cache_creation_input_tokens || 0,
-              cache_read: usage.cache_read_input_tokens || 0
-            },
-            model: hookData.message.model || 'unknown',
-            interaction_id: interactionId,
-            source: 'stdin'
-          };
-          console.error(`[DEBUG] Parsed usage data from stdin: ${JSON.stringify(usageData)}`);
-        }
-      } else {
-        console.error(`[DEBUG] No hook data received from stdin`);
-      }
-    } catch (error) {
-      console.error(`[DEBUG] Error reading stdin: ${error.message}`);
-    }
-    
-    // If no stdin data, fall back to JSONL scanning
-    if (!usageData) {
-      console.error(`[DEBUG] No stdin usage data, falling back to JSONL scanning...`);
-      usageData = await getLatestTokenUsage();
-    }
-    
-    if (!usageData) {
-      console.error('[DEBUG] No token usage data found - exiting gracefully');
-      console.error(`[DEBUG] ====== Hook execution ended (no data) ======`);
+    // Skip if not authenticated
+    if (config.twitterUrl === "@your_handle") {
+      console.error(`[INFO] User not authenticated - skipping submission`);
       process.exit(0);
     }
     
-    console.error(`[DEBUG] Found usage data: ${JSON.stringify(usageData)}`)
+    // Load tracking data to check what's already submitted
+    const trackingData = await loadTracking();
+    console.error(`[INFO] Loaded tracking data with ${Object.keys(trackingData).length} submitted entries`);
     
+    // Get latest unsubmitted usage data
+    const usageData = await getLatestTokenUsage(trackingData);
+    
+    if (!usageData) {
+      // Silently exit if no new data - this is normal
+      process.exit(0);
+    }
     
     const tokens = usageData.tokens;
     const totalTokens = tokens.input + tokens.output + tokens.cache_creation + tokens.cache_read;
-    
-    
-    const config = await loadConfig();
-    
-    // Skip submission if not authenticated (using default handle)
-    if (config.twitterUrl === "@your_handle") {
-      console.error(`[DEBUG] User not authenticated - skipping API submission`);
-      console.error(`[DEBUG] ====== Hook execution ended (not authenticated) ======`);
-      process.exit(0);
-    }
-    
-    // Load tracking data
-    const trackingData = await loadTracking();
-    
-    // Check if this interaction was already submitted
-    if (usageData.interaction_id && trackingData[usageData.interaction_id]) {
-      console.error(`[DEBUG] Interaction ${usageData.interaction_id} already submitted at ${trackingData[usageData.interaction_id]}`);
-      console.error(`[DEBUG] ====== Hook execution ended (duplicate) ======`);
-      process.exit(0);
-    }
     
     // ENHANCEMENT: Check if we have authenticated user data
     const apiPayload = {
@@ -567,89 +429,33 @@ async function main() {
     // ENHANCEMENT: Add twitter_user_id if available
     if (config.twitterUserId) {
       apiPayload.twitter_user_id = config.twitterUserId;
-      console.error(`[DEBUG] Adding authenticated user ID: ${config.twitterUserId}`);
     }
-    
-    // Log to console instead of file
-    console.error(
-      `[${usageData.timestamp}] ` +
-      `Total: ${totalTokens} tokens ` +
-      `(Input: ${tokens.input}, Output: ${tokens.output}, ` +
-      `Cache Create: ${tokens.cache_creation}, Cache Read: ${tokens.cache_read}) ` +
-      `Model: ${usageData.model} ID: ${usageData.interaction_id}`
-    );
     
     // Send to API endpoint
     try {
       const baseEndpoint = config.endpoint || "http://localhost:8000";
       const endpoint = `${baseEndpoint}/api/usage/hook`;
-      console.error(`Sending to API: ${endpoint}`);
+      console.error(`[INFO] Submitting to API: ${endpoint}`);
       
       const result = await sendToAPI(endpoint, apiPayload);
-      console.error(`API Response: ${JSON.stringify(result)}`);
+      console.error(`[INFO] ✅ Successfully submitted ${totalTokens} tokens`);
       
-      // Log successful submission
-      console.error(`[${new Date().toISOString()}] Successfully sent to API: ${totalTokens} tokens`);
-      
-      // Save to tracking data if interaction_id exists
+      // Save to tracking data to prevent re-submission
       if (usageData.interaction_id) {
         trackingData[usageData.interaction_id] = usageData.timestamp || new Date().toISOString();
         await saveTracking(trackingData);
-        console.error(`[DEBUG] Saved interaction ${usageData.interaction_id} to tracking`);
       }
     } catch (apiError) {
-      console.error(`Failed to send to API: ${apiError.message}`);
-      // Log API failure but don't fail the hook
-      console.error(`[${new Date().toISOString()}] API submission failed: ${apiError.message}`);
+      console.error(`[ERROR] Failed to submit to API: ${apiError.message}`);
       // Don't save to tracking on failure - will retry next time
     }
     
-    // After processing stdin data, check for any backlog of unsubmitted entries
-    if (usageData.source === 'stdin') {
-      console.error(`[DEBUG] Checking for backlog of unsubmitted entries...`);
-      const unsubmittedEntries = await getAllUnsubmittedUsage(trackingData, 5); // Process up to 5 backlog entries
-      
-      if (unsubmittedEntries.length > 0) {
-        console.error(`[DEBUG] Processing ${unsubmittedEntries.length} backlog entries...`);
-        
-        for (const backlogEntry of unsubmittedEntries) {
-          try {
-            const backlogPayload = {
-              twitter_handle: config.twitterUrl,
-              timestamp: backlogEntry.timestamp,
-              tokens: backlogEntry.tokens,
-              model: backlogEntry.model,
-              interaction_id: backlogEntry.interaction_id
-            };
-            
-            if (config.twitterUserId) {
-              backlogPayload.twitter_user_id = config.twitterUserId;
-            }
-            
-            const result = await sendToAPI(`${config.endpoint || "https://api.claudecount.com"}/api/usage/hook`, backlogPayload);
-            console.error(`[DEBUG] Backlog entry ${backlogEntry.interaction_id} submitted successfully`);
-            
-            // Save to tracking
-            if (backlogEntry.interaction_id) {
-              trackingData[backlogEntry.interaction_id] = backlogEntry.timestamp || new Date().toISOString();
-            }
-          } catch (error) {
-            console.error(`[DEBUG] Failed to submit backlog entry: ${error.message}`);
-            // Continue with next entry
-          }
-        }
-        
-        // Save updated tracking data
-        await saveTracking(trackingData);
-      }
-    }
+    // No backlog processing - keep it simple like ccusage
     
-    console.error(`[DEBUG] ====== Hook execution completed successfully ======`);
+    console.error(`[INFO] ====== Hook completed successfully ======`);
     process.exit(0);
   } catch (error) {
-    console.error(`[DEBUG] Hook error: ${error.message}`);
-    console.error(`[DEBUG] Stack trace: ${error.stack}`);
-    console.error(`[DEBUG] ====== Hook execution ended (error) ======`);
+    console.error(`[ERROR] Hook failed: ${error.message}`);
     process.exit(0); 
   }
 }
