@@ -4,10 +4,11 @@ import { homedir } from 'os';
 import { existsSync } from 'fs';
 import { API_BASE_URL } from './constants.js';
 
-const CLAUDE_DIR = join(homedir(), '.claude');
+export const CLAUDE_DIR = join(homedir(), '.claude');
 const CONFIG_FILE = join(CLAUDE_DIR, 'leaderboard.json');
 const HOOK_SCRIPT_PATH = join(CLAUDE_DIR, 'count_tokens.js');
 const SETTINGS_JSON_PATH = join(CLAUDE_DIR, 'settings.json');
+const ENCRYPTION_KEY_PATH = join(CLAUDE_DIR, '.encryption_key');
 
 export async function ensureConfigDir() {
   if (!existsSync(CLAUDE_DIR)) {
@@ -122,11 +123,12 @@ async function removeHookFromJson() {
   return false;
 }
 
-export async function removeAllCodebragFiles() {
+export async function removeAllClaudeCountFiles() {
   const results = {
     leaderboardConfig: false,
     hookScript: false,
-    settingsJson: false
+    settingsJson: false,
+    encryptionKey: false
   };
   
   // Remove leaderboard.json
@@ -151,6 +153,16 @@ export async function removeAllCodebragFiles() {
   
   // Remove hook from settings.json
   results.settingsJson = await removeHookFromJson();
+  
+  // Remove encryption key
+  if (existsSync(ENCRYPTION_KEY_PATH)) {
+    try {
+      await unlink(ENCRYPTION_KEY_PATH);
+      results.encryptionKey = true;
+    } catch (error) {
+      console.error('Error removing .encryption_key:', error);
+    }
+  }
   
   return results;
 }

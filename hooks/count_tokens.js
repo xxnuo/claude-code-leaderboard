@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { homedir } from 'node:os';
-import { glob } from 'tinyglobby';
+import https from 'node:https';
+import http from 'node:http';
 
 
 const USER_HOME_DIR = homedir();
@@ -15,6 +16,8 @@ const DEFAULT_CLAUDE_CONFIG_PATH = `${XDG_CONFIG_DIR}/claude`;
 const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
 const CLAUDE_PROJECTS_DIR_NAME = 'projects';
 const USAGE_DATA_GLOB_PATTERN = '**/*.jsonl';
+const TRACKING_FILE = path.join(USER_HOME_DIR, '.claude', 'leaderboard_submitted.json');
+const TRACKING_RETENTION_DAYS = 30;
 
 
 function validateUsageData(data) {
@@ -131,6 +134,90 @@ function parseUsageFromLine(line) {
 }
 
 
+async function findJsonlFiles(dir) {
+  const files = [];
+  
+  async function walkDir(currentPath) {
+    try {
+      const entries = await readdir(currentPath, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(currentPath, entry.name);
+        
+        if (entry.isDirectory()) {
+          await walkDir(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          files.push(fullPath);
+        }
+      }
+    } catch (error) {
+      console.error(`[DEBUG] Error reading directory ${currentPath}: ${error.message}`);
+    }
+  }
+  
+  await walkDir(dir);
+  return files;
+}
+
+async function getAllUnsubmittedUsage(trackingData = {}, limit = 10) {
+  const claudePaths = getClaudePaths();
+  if (claudePaths.length === 0) {
+    return [];
+  }
+  
+  const allFiles = [];
+  for (const claudePath of claudePaths) {
+    const claudeDir = path.join(claudePath, CLAUDE_PROJECTS_DIR_NAME);
+    try {
+      const files = await findJsonlFiles(claudeDir);
+      allFiles.push(...files);
+    } catch (error) {
+      continue;
+    }
+  }
+  
+  if (allFiles.length === 0) {
+    return [];
+  }
+  
+  const sortedFiles = await sortFilesByTimestamp(allFiles);
+  const unsubmittedEntries = [];
+  const processedHashes = new Set();
+  
+  // Check recent files for unsubmitted entries
+  for (const file of sortedFiles.slice(0, 50)) { // Check up to 50 files
+    if (unsubmittedEntries.length >= limit) break;
+    
+    try {
+      const content = await readFile(file, 'utf-8');
+      const lines = content.trim().split('\n').filter(line => line.length > 0);
+      
+      // Process lines in chronological order (oldest first)
+      for (const line of lines) {
+        if (unsubmittedEntries.length >= limit) break;
+        
+        const usageData = parseUsageFromLine(line);
+        if (!usageData) continue;
+        
+        const uniqueHash = usageData.interaction_id;
+        
+        // Skip if no ID, already processed in this scan, or already submitted
+        if (!uniqueHash || processedHashes.has(uniqueHash) || trackingData[uniqueHash]) {
+          continue;
+        }
+        
+        processedHashes.add(uniqueHash);
+        unsubmittedEntries.push(usageData);
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+  
+  console.error(`[DEBUG] Found ${unsubmittedEntries.length} unsubmitted entries`);
+  return unsubmittedEntries;
+}
+
 async function getLatestTokenUsage() {
   const claudePaths = getClaudePaths();
   console.error(`Claude paths found: ${claudePaths.join(', ')}`);
@@ -145,17 +232,14 @@ async function getLatestTokenUsage() {
     const claudeDir = path.join(claudePath, CLAUDE_PROJECTS_DIR_NAME);
     console.error(`[DEBUG] Searching for JSONL files in: ${claudeDir}`);
     try {
-      const files = await glob([USAGE_DATA_GLOB_PATTERN], {
-        cwd: claudeDir,
-        absolute: true
-      });
+      const files = await findJsonlFiles(claudeDir);
       console.error(`[DEBUG] Found ${files.length} files in ${claudeDir}`);
       if (files.length > 0) {
         console.error(`[DEBUG] Sample files: ${files.slice(0, 3).join(', ')}`);
       }
       allFiles.push(...files);
     } catch (error) {
-      console.error(`[DEBUG] Error globbing in ${claudeDir}: ${error.message}`);
+      console.error(`[DEBUG] Error searching in ${claudeDir}: ${error.message}`);
       continue;
     }
   }
@@ -173,37 +257,22 @@ async function getLatestTokenUsage() {
   
   
   const processedHashes = new Set();
+  const maxFilesToCheck = 20; // Check more files
+  const filesToCheck = sortedFiles.slice(0, maxFilesToCheck);
   
+  console.error(`[DEBUG] Checking ${filesToCheck.length} most recent files out of ${sortedFiles.length} total`);
   
-  for (const file of sortedFiles.slice(0, 5)) { 
+  for (const file of filesToCheck) {
     try {
       const content = await readFile(file, 'utf-8');
       const lines = content.trim().split('\n').filter(line => line.length > 0);
       
+      console.error(`[DEBUG] File ${path.basename(file)} has ${lines.length} lines`);
       
-      console.error(`File ${path.basename(file)} has ${lines.length} lines`);
-      
-      // Debug: Sample first few lines
-      if (lines.length > 0) {
-        console.error(`Sample line from file:`, lines[0].substring(0, 200));
-      }
-      
+      // Process lines in reverse order (newest first)
       for (const line of lines.reverse()) {
-        // Try to parse the line for debugging
-        try {
-          const data = JSON.parse(line.trim());
-          
-          // Debug: Log what we found
-          if (data.message && data.message.usage) {
-            console.error(`Found usage data:`, JSON.stringify(data.message.usage));
-          }
-        } catch (e) {
-          // Skip invalid JSON
-        }
-        
         const usageData = parseUsageFromLine(line);
         if (!usageData) continue;
-        
         
         const uniqueHash = usageData.interaction_id;
         if (uniqueHash && processedHashes.has(uniqueHash)) {
@@ -214,7 +283,8 @@ async function getLatestTokenUsage() {
           processedHashes.add(uniqueHash);
         }
         
-        
+        // Return the first valid, non-duplicate usage found
+        console.error(`[DEBUG] Found valid usage data in file ${path.basename(file)}`);
         return usageData;
       }
     } catch (error) {
@@ -223,7 +293,7 @@ async function getLatestTokenUsage() {
     }
   }
   
-  console.error(`[DEBUG] No valid usage data found after checking ${sortedFiles.length} files`);
+  console.error(`[DEBUG] No valid usage data found after checking ${filesToCheck.length} files`);
   return null;
 }
 
@@ -237,41 +307,158 @@ async function loadConfig() {
     
     return {
       twitterUrl: "@your_handle", 
-      endpoint: "http://localhost:8000"
+      endpoint: "https://api.claudecount.com"
     };
   }
 }
 
 
-async function sendToAPI(endpoint, payload) {
+async function loadTracking() {
   try {
-    console.error(`[DEBUG] Sending payload to API: ${JSON.stringify(payload)}`);
-    console.error(`[DEBUG] API endpoint: ${endpoint}`);
+    const content = await readFile(TRACKING_FILE, 'utf-8');
+    const data = JSON.parse(content);
     
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    });
+    // Clean up old entries
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - TRACKING_RETENTION_DAYS);
+    const cutoffTimestamp = cutoffDate.toISOString();
     
-    console.error(`[DEBUG] API response status: ${response.status} ${response.statusText}`);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[DEBUG] API error response: ${errorText}`);
-      throw new Error(`HTTP error! status: ${response.status}`);
+    const cleanedData = {};
+    for (const [id, timestamp] of Object.entries(data)) {
+      if (timestamp > cutoffTimestamp) {
+        cleanedData[id] = timestamp;
+      }
     }
     
-    const result = await response.json();
-    console.error(`[DEBUG] API success response: ${JSON.stringify(result)}`);
-    return result;
-  } catch (error) {
-    console.error(`[DEBUG] Failed to send to API: ${error.message}`);
-    console.error(`[DEBUG] Error type: ${error.constructor.name}`);
-    throw error;
+    return cleanedData;
+  } catch {
+    // File doesn't exist or is invalid
+    return {};
   }
+}
+
+
+async function saveTracking(trackingData) {
+  try {
+    // Ensure directory exists
+    const dir = path.dirname(TRACKING_FILE);
+    if (!existsSync(dir)) {
+      await mkdir(dir, { recursive: true });
+    }
+    
+    await writeFile(TRACKING_FILE, JSON.stringify(trackingData, null, 2));
+    console.error(`[DEBUG] Saved tracking data with ${Object.keys(trackingData).length} entries`);
+  } catch (error) {
+    console.error(`[DEBUG] Failed to save tracking data: ${error.message}`);
+  }
+}
+
+
+async function sendToAPI(endpoint, payload, maxRetries = 3) {
+  let lastError;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = Math.pow(2, attempt - 1) * 1000;
+      console.error(`[DEBUG] Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    try {
+      const result = await new Promise((resolve, reject) => {
+        try {
+          console.error(`[DEBUG] Sending payload to API: ${JSON.stringify(payload)}`);
+          console.error(`[DEBUG] API endpoint: ${endpoint}`);
+          
+          const url = new URL(endpoint);
+          const data = JSON.stringify(payload);
+          
+          const options = {
+            hostname: url.hostname,
+            port: url.port || (url.protocol === 'https:' ? 443 : 80),
+            path: url.pathname + url.search,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(data)
+            },
+            timeout: 30000 // 30 second timeout
+          };
+          
+          const lib = url.protocol === 'https:' ? https : http;
+          
+          const req = lib.request(options, (res) => {
+            let responseData = '';
+            
+            res.on('data', (chunk) => {
+              responseData += chunk;
+            });
+            
+            res.on('end', () => {
+              console.error(`[DEBUG] API response status: ${res.statusCode} ${res.statusMessage}`);
+              
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                try {
+                  const result = JSON.parse(responseData);
+                  console.error(`[DEBUG] API success response: ${JSON.stringify(result)}`);
+                  resolve(result);
+                } catch (e) {
+                  resolve({ status: 'ok', response: responseData });
+                }
+              } else if (res.statusCode === 409) {
+                // Conflict - duplicate submission, treat as success
+                console.error(`[DEBUG] 409 Conflict - duplicate submission (this is OK)`);
+                resolve({ status: 'duplicate', response: responseData });
+              } else if (res.statusCode >= 500) {
+                // Server error - retry
+                reject(new Error(`Server error: ${res.statusCode}`));
+              } else {
+                // Client error - don't retry
+                console.error(`[DEBUG] API error response: ${responseData}`);
+                reject(new Error(`HTTP error! status: ${res.statusCode}`));
+              }
+            });
+          });
+          
+          req.on('error', (error) => {
+            console.error(`[DEBUG] Failed to send to API: ${error.message}`);
+            console.error(`[DEBUG] Error type: ${error.constructor.name}`);
+            reject(error);
+          });
+          
+          req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('Request timeout'));
+          });
+          
+          req.write(data);
+          req.end();
+        } catch (error) {
+          console.error(`[DEBUG] Failed to send to API: ${error.message}`);
+          console.error(`[DEBUG] Error type: ${error.constructor.name}`);
+          reject(error);
+        }
+      });
+      
+      // Success - return result
+      return result;
+      
+    } catch (error) {
+      lastError = error;
+      
+      // Don't retry on client errors (4xx)
+      if (error.message.includes('HTTP error') && !error.message.includes('Server error')) {
+        throw error;
+      }
+      
+      // Continue to next retry for server errors and network issues
+      console.error(`[DEBUG] Attempt ${attempt + 1} failed: ${error.message}`);
+    }
+  }
+  
+  // All retries failed
+  throw lastError || new Error('All retry attempts failed');
 }
 
 async function main() {
@@ -285,13 +472,14 @@ async function main() {
     const logFile = path.join(USER_HOME_DIR, '.claude', 'hook_debug.log');
     const logEntry = `[${new Date().toISOString()}] Hook started - PID: ${process.pid} CWD: ${process.cwd()}\n`;
     await readFile(logFile, 'utf-8').catch(() => '').then(async (content) => {
-      await import('fs/promises').then(fs => fs.writeFile(logFile, content + logEntry));
+      await writeFile(logFile, content + logEntry);
     });
     
 
     // Read hook data from stdin (Claude passes data via stdin)
+    let hookData = null;
+    let usageData = null;
     
-    let hookData = {};
     try {
       const stdin = process.stdin;
       stdin.setEncoding('utf-8');
@@ -301,7 +489,27 @@ async function main() {
       }
       if (data.trim()) {
         hookData = JSON.parse(data);
-        console.error(`[DEBUG] Received hook data from stdin`);
+        console.error(`[DEBUG] Received hook data from stdin: ${JSON.stringify(hookData)}`);
+        
+        // Parse usage data from stdin if available
+        if (hookData && hookData.message && hookData.message.usage) {
+          const usage = hookData.message.usage;
+          const interactionId = hookData.requestId || hookData.message?.id || null;
+          
+          usageData = {
+            timestamp: hookData.timestamp || new Date().toISOString(),
+            tokens: {
+              input: usage.input_tokens || 0,
+              output: usage.output_tokens || 0,
+              cache_creation: usage.cache_creation_input_tokens || 0,
+              cache_read: usage.cache_read_input_tokens || 0
+            },
+            model: hookData.message.model || 'unknown',
+            interaction_id: interactionId,
+            source: 'stdin'
+          };
+          console.error(`[DEBUG] Parsed usage data from stdin: ${JSON.stringify(usageData)}`);
+        }
       } else {
         console.error(`[DEBUG] No hook data received from stdin`);
       }
@@ -309,9 +517,11 @@ async function main() {
       console.error(`[DEBUG] Error reading stdin: ${error.message}`);
     }
     
-    
-    console.error(`[DEBUG] Starting token usage search...`);
-    const usageData = await getLatestTokenUsage();
+    // If no stdin data, fall back to JSONL scanning
+    if (!usageData) {
+      console.error(`[DEBUG] No stdin usage data, falling back to JSONL scanning...`);
+      usageData = await getLatestTokenUsage();
+    }
     
     if (!usageData) {
       console.error('[DEBUG] No token usage data found - exiting gracefully');
@@ -327,6 +537,23 @@ async function main() {
     
     
     const config = await loadConfig();
+    
+    // Skip submission if not authenticated (using default handle)
+    if (config.twitterUrl === "@your_handle") {
+      console.error(`[DEBUG] User not authenticated - skipping API submission`);
+      console.error(`[DEBUG] ====== Hook execution ended (not authenticated) ======`);
+      process.exit(0);
+    }
+    
+    // Load tracking data
+    const trackingData = await loadTracking();
+    
+    // Check if this interaction was already submitted
+    if (usageData.interaction_id && trackingData[usageData.interaction_id]) {
+      console.error(`[DEBUG] Interaction ${usageData.interaction_id} already submitted at ${trackingData[usageData.interaction_id]}`);
+      console.error(`[DEBUG] ====== Hook execution ended (duplicate) ======`);
+      process.exit(0);
+    }
     
     // ENHANCEMENT: Check if we have authenticated user data
     const apiPayload = {
@@ -363,12 +590,59 @@ async function main() {
       
       // Log successful submission
       console.error(`[${new Date().toISOString()}] Successfully sent to API: ${totalTokens} tokens`);
+      
+      // Save to tracking data if interaction_id exists
+      if (usageData.interaction_id) {
+        trackingData[usageData.interaction_id] = usageData.timestamp || new Date().toISOString();
+        await saveTracking(trackingData);
+        console.error(`[DEBUG] Saved interaction ${usageData.interaction_id} to tracking`);
+      }
     } catch (apiError) {
       console.error(`Failed to send to API: ${apiError.message}`);
       // Log API failure but don't fail the hook
       console.error(`[${new Date().toISOString()}] API submission failed: ${apiError.message}`);
+      // Don't save to tracking on failure - will retry next time
     }
     
+    // After processing stdin data, check for any backlog of unsubmitted entries
+    if (usageData.source === 'stdin') {
+      console.error(`[DEBUG] Checking for backlog of unsubmitted entries...`);
+      const unsubmittedEntries = await getAllUnsubmittedUsage(trackingData, 5); // Process up to 5 backlog entries
+      
+      if (unsubmittedEntries.length > 0) {
+        console.error(`[DEBUG] Processing ${unsubmittedEntries.length} backlog entries...`);
+        
+        for (const backlogEntry of unsubmittedEntries) {
+          try {
+            const backlogPayload = {
+              twitter_handle: config.twitterUrl,
+              timestamp: backlogEntry.timestamp,
+              tokens: backlogEntry.tokens,
+              model: backlogEntry.model,
+              interaction_id: backlogEntry.interaction_id
+            };
+            
+            if (config.twitterUserId) {
+              backlogPayload.twitter_user_id = config.twitterUserId;
+            }
+            
+            const result = await sendToAPI(`${config.endpoint || "https://api.claudecount.com"}/api/usage/hook`, backlogPayload);
+            console.error(`[DEBUG] Backlog entry ${backlogEntry.interaction_id} submitted successfully`);
+            
+            // Save to tracking
+            if (backlogEntry.interaction_id) {
+              trackingData[backlogEntry.interaction_id] = backlogEntry.timestamp || new Date().toISOString();
+            }
+          } catch (error) {
+            console.error(`[DEBUG] Failed to submit backlog entry: ${error.message}`);
+            // Continue with next entry
+          }
+        }
+        
+        // Save updated tracking data
+        await saveTracking(trackingData);
+      }
+    }
     
     console.error(`[DEBUG] ====== Hook execution completed successfully ======`);
     process.exit(0);

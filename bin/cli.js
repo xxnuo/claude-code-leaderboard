@@ -8,8 +8,6 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 import { authCommand } from '../src/commands/auth.js';
-import { statsCommand } from '../src/commands/stats.js';
-import { leaderboardCommand } from '../src/commands/leaderboard.js';
 import { resetCommand } from '../src/commands/reset.js';
 import { checkAuthStatus } from '../src/utils/config.js';
 import { ensureHookInstalled } from '../src/utils/hook-installer.js';
@@ -27,32 +25,29 @@ await ensureHookInstalled();
 const program = new Command();
 
 program
-  .name('codebrag')
+  .name('claudecount')
   .description('Track your Claude Code usage and compete on the leaderboard')
   .version(packageData.version);
 
 // Default command (when no subcommand is specified)
 program
   .action(async () => {
-    console.log(chalk.blue('🚀 Codebrag'));
+    console.log(chalk.blue('🚀 CLAUDE COUNT'));
     console.log(chalk.gray('━'.repeat(40)));
     
     try {
       const authStatus = await checkAuthStatus();
       
       if (!authStatus.isAuthenticated) {
-        console.log(chalk.yellow('🔐 Authentication required'));
-        console.log(chalk.gray('To track your usage and join the leaderboard, you need to authenticate with Twitter.'));
+        console.log(chalk.yellow('👋 Welcome to CLAUDE COUNT!'));
+        console.log(chalk.yellow('🐦 Let\'s connect your Twitter account...'));
         console.log();
         
         // Run authentication flow
         await authCommand();
       } else {
-        console.log(chalk.green(`👋 Welcome back ${authStatus.twitterHandle}!`));
-        console.log();
-        
-        // Show current stats
-        await statsCommand();
+        // Already authenticated - just run auth command to re-auth or show status
+        await authCommand();
       }
     } catch (error) {
       console.error(chalk.red('❌ Error:'), error.message);
@@ -60,45 +55,7 @@ program
     }
   });
 
-// Auth command
-program
-  .command('auth')
-  .description('Authenticate with Twitter')
-  .action(async () => {
-    try {
-      await authCommand();
-    } catch (error) {
-      console.error(chalk.red('❌ Authentication failed:'), error.message);
-      process.exit(1);
-    }
-  });
 
-// Stats command
-program
-  .command('stats')
-  .description('View your usage statistics')
-  .action(async () => {
-    try {
-      await statsCommand();
-    } catch (error) {
-      console.error(chalk.red('❌ Error fetching stats:'), error.message);
-      process.exit(1);
-    }
-  });
-
-// Leaderboard command
-program
-  .command('leaderboard')
-  .description('View the current leaderboard')
-  .option('-l, --limit <number>', 'Number of users to show', '10')
-  .action(async (options) => {
-    try {
-      await leaderboardCommand(options);
-    } catch (error) {
-      console.error(chalk.red('❌ Error fetching leaderboard:'), error.message);
-      process.exit(1);
-    }
-  });
 
 // Reset command
 program
@@ -126,7 +83,7 @@ program
 // Error handling
 program.on('command:*', () => {
   console.error(chalk.red('❌ Invalid command:'), chalk.yellow(program.args.join(' ')));
-  console.log(chalk.gray('Run'), chalk.cyan('codebrag --help'), chalk.gray('for available commands'));
+  console.log(chalk.gray('Run'), chalk.cyan('claudecount --help'), chalk.gray('for available commands'));
   process.exit(1);
 });
 

@@ -1,19 +1,49 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypto';
-import { loadConfig, saveConfig } from '../utils/config.js';
+import { loadConfig, saveConfig, ensureConfigDir, CLAUDE_DIR } from '../utils/config.js';
+import { readFile, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { existsSync } from 'fs';
+import { chmod } from 'fs/promises';
 
-// Derive a proper encryption key from the environment variable
-const ENCRYPTION_PASSWORD = process.env.ENCRYPTION_KEY || 'default_key_change_in_production';
 const ALGORITHM = 'aes-256-gcm';
-const SALT = 'codebrag-salt';
+const ENCRYPTION_KEY_PATH = join(CLAUDE_DIR, '.encryption_key');
 
-// Derive a 32-byte key from the password
-function deriveKey(password) {
-  return createHash('sha256').update(password + SALT).digest();
+// Generate a secure random encryption key
+function generateEncryptionKey() {
+  return randomBytes(32);
 }
 
-function encryptToken(token) {
+// Load or create encryption key
+async function getOrCreateEncryptionKey() {
+  await ensureConfigDir();
+  
+  if (existsSync(ENCRYPTION_KEY_PATH)) {
+    try {
+      const keyBuffer = await readFile(ENCRYPTION_KEY_PATH);
+      return keyBuffer;
+    } catch (error) {
+      console.error('Error reading encryption key:', error);
+    }
+  }
+  
+  // Generate new key
+  const newKey = generateEncryptionKey();
+  
   try {
-    const key = deriveKey(ENCRYPTION_PASSWORD);
+    // Write key with restricted permissions
+    await writeFile(ENCRYPTION_KEY_PATH, newKey);
+    await chmod(ENCRYPTION_KEY_PATH, 0o600); // Read/write for owner only
+    return newKey;
+  } catch (error) {
+    console.error('Error saving encryption key:', error);
+    // Fallback to in-memory key (not ideal but prevents total failure)
+    return newKey;
+  }
+}
+
+async function encryptToken(token) {
+  try {
+    const key = await getOrCreateEncryptionKey();
     const iv = randomBytes(16);
     const cipher = createCipheriv(ALGORITHM, key, iv);
     
@@ -31,7 +61,7 @@ function encryptToken(token) {
   }
 }
 
-function decryptToken(encryptedToken) {
+async function decryptToken(encryptedToken) {
   try {
     // Check if token is in encrypted format
     if (!encryptedToken.includes(':')) {
@@ -41,7 +71,7 @@ function decryptToken(encryptedToken) {
     
     const [ivHex, authTagHex, encrypted] = encryptedToken.split(':');
     
-    const key = deriveKey(ENCRYPTION_PASSWORD);
+    const key = await getOrCreateEncryptionKey();
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
     
@@ -63,8 +93,8 @@ function decryptToken(encryptedToken) {
 export async function storeOAuth1aTokens(oauthToken, oauthTokenSecret) {
   const config = await loadConfig();
   
-  config.oauth_token = encryptToken(oauthToken);
-  config.oauth_token_secret = encryptToken(oauthTokenSecret);
+  config.oauth_token = await encryptToken(oauthToken);
+  config.oauth_token_secret = await encryptToken(oauthTokenSecret);
   config.oauthVersion = '1.0a';
   
   await saveConfig(config);
@@ -80,8 +110,8 @@ export async function getTokens() {
   
   return {
     oauthVersion: '1.0a',
-    oauth_token: decryptToken(config.oauth_token),
-    oauth_token_secret: decryptToken(config.oauth_token_secret)
+    oauth_token: await decryptToken(config.oauth_token),
+    oauth_token_secret: await decryptToken(config.oauth_token_secret)
   };
 }
 

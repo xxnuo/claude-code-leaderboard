@@ -1,3 +1,4 @@
+import fetch from 'node-fetch';
 import { getValidAccessToken } from '../auth/tokens.js';
 import { loadConfig } from './config.js';
 import { API_BASE_URL } from './constants.js';
@@ -10,7 +11,8 @@ import { API_BASE_URL } from './constants.js';
  */
 export async function authenticatedFetch(path, options = {}) {
   const config = await loadConfig();
-  const endpoint = config.endpoint || API_BASE_URL;
+  // Prioritize environment variable (for dev) over saved config
+  const endpoint = API_BASE_URL || config.endpoint;
   
   // Get valid tokens
   const tokens = await getValidAccessToken();
@@ -34,7 +36,7 @@ export async function authenticatedFetch(path, options = {}) {
   
   // If we get a 401, authentication failed
   if (response.status === 401) {
-    throw new Error('Authentication failed. Please run "codebrag auth" to re-authenticate.');
+    throw new Error('Authentication failed. Please run "claudecount auth" to re-authenticate.');
   }
   
   return response;
@@ -48,7 +50,8 @@ export async function authenticatedFetch(path, options = {}) {
  */
 export async function apiFetch(path, options = {}) {
   const config = await loadConfig();
-  const endpoint = config.endpoint || API_BASE_URL;
+  // Prioritize environment variable (for dev) over saved config  
+  const endpoint = API_BASE_URL || config.endpoint;
   
   const url = `${endpoint}${path}`;
   

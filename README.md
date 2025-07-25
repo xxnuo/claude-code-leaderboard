@@ -1,56 +1,151 @@
-# Codebrag CLI
+# Claude Code Leaderboard CLI
 
-NPX package for tracking Claude Code usage and participating in the leaderboard with Twitter authentication.
+Track your Claude Code usage and compete on the global leaderboard! This CLI automatically monitors your token usage and posts your stats to the leaderboard after each Claude Code session.
 
-## Installation
+## Quick Start
 
 ```bash
-npx codebrag
+npx claude-code-leaderboard
 ```
 
-## Usage
+Follow the setup prompts to authenticate with Twitter and start tracking your usage automatically.
 
-### First Time Setup
+## How It Works
+
+The CLI integrates with Claude Code's hook system to automatically track your usage:
+
+1. **Automatic Setup**: Installs a tracking hook in your Claude Code configuration
+2. **Usage Monitoring**: After each Claude Code session ends (STOP command), your token usage is collected
+3. **Data Submission**: Usage data is automatically sent to our backend service 
+4. **Leaderboard Updates**: Your stats appear on the public leaderboard at [claudecount.com](https://claudecount.com)
+
+### What Gets Tracked
+
+- Input tokens used
+- Output tokens generated  
+- Cache creation/read tokens
+- Session timestamps
+- Model used (e.g., claude-sonnet-4)
+
+Your actual prompts and responses are never collected - only usage statistics.
+
+## Understanding Claude Code Hooks
+
+### What Are Hooks?
+Claude Code hooks are user-defined shell commands that execute automatically at specific points during Claude Code's execution lifecycle. They allow you to inject deterministic, programmatic actions directly into the agent's workflow - ensuring that key tasks always occur exactly when intended, rather than relying on the AI to remember to do them.
+
+### Hook Types
+Claude Code supports hooks at different lifecycle events:
+- **Start**: When a Claude Code session begins
+- **Stop**: When a Claude Code session ends  
+- **PreTool**: Before any tool or command is executed
+- **PostTool**: After a tool or command completes
+
+### How This Project Uses Hooks
+This leaderboard CLI specifically uses a **Stop** hook, which means:
+- Every time you finish a Claude Code session (when Claude Code exits)
+- The hook automatically executes with your user permissions
+- No confirmation is required - it runs silently in the background
+- The hook scans your Claude Code usage data and sends statistics to our backend
+
+This provides reliable, automatic tracking without you having to remember to manually submit your usage.
+
+## File Installation Details
+
+When you run the setup, the following files are created on your system:
+
+### Hook Script
+- **Location**: `~/.claude/count_tokens.js`
+- **Purpose**: The actual script that collects and sends your usage data
+- **Permissions**: Executes with your user permissions
+- **When it runs**: Automatically after each Claude Code session ends
+
+### Configuration Files
+- **`~/.claude/settings.json`**: Updated to register the Stop hook
+- **`~/.claude/leaderboard.json`**: Stores your Twitter authentication and API settings
+
+### What the Hook Does
+The `count_tokens.js` script:
+1. Scans Claude Code project directories for usage log files (`.jsonl` files)
+2. Extracts token usage statistics from the most recent session
+3. Sends only the statistics (not your prompts/responses) to our backend
+4. Updates your position on the leaderboard
+
+## Commands
+
 ```bash
-# Run the CLI and follow the authentication prompts
-npx codebrag
-```
+# Setup or re-authenticate
+npx claude-code-leaderboard
 
-### Commands
-
-```bash
-# Authenticate with Twitter
-npx codebrag auth
-
-# View your usage statistics
-npx codebrag stats
-
-# View the leaderboard
-npx codebrag leaderboard
+# Reset/uninstall (with optional account deletion)
+npx claude-code-leaderboard reset
 
 # View help
-npx codebrag --help
+npx claude-code-leaderboard --help
 ```
 
 ## Features
 
-- **One-command setup**: `npx codebrag` handles everything
-- **Automatic hook installation**: Token tracking is set up automatically on first run
-- **Seamless Twitter Authentication**: OAuth 1.0a skips login if you're already signed in
-- **Usage tracking**: Seamless integration with Claude Code
-- **Leaderboard**: See how you rank among other users
-- **Real-time stats**: View your usage statistics
-- **Secure storage**: Encrypted token storage
+- **One-command setup**: Complete setup with a single command
+- **Automatic tracking**: Seamless integration with Claude Code hooks
+- **Twitter authentication**: Secure OAuth 1.0a authentication
+- **Privacy-focused**: Only usage statistics are collected
+- **Cross-platform**: Works on macOS, Linux, and Windows
+- **View stats online**: Visit [claudecount.com](https://claudecount.com) to see your stats and the leaderboard
 
 ## Requirements
 
 - Node.js 16.0.0 or higher
-- Claude Code with hook system configured
+- Claude Code CLI installed and configured
 - Twitter account for authentication
 
 ## Configuration
 
-The CLI automatically creates and manages `~/.claude/leaderboard.json` with your authentication data and API endpoint configuration.
+The CLI automatically manages your configuration in `~/.claude/leaderboard.json` including:
+- Twitter authentication tokens
+- API endpoint settings
+- User preferences
+
+## Privacy & Security
+
+### What Data Is Collected
+- **Usage statistics only**: Token counts, timestamps, model names
+- **No content**: Your actual prompts and Claude's responses are never transmitted
+- **Linked to Twitter**: All data is associated with your Twitter handle for leaderboard display
+
+### Security Considerations
+- **User permissions**: The hook runs with your full user permissions
+- **Automatic execution**: No confirmation required when the hook runs
+- **Trusted source**: Only install hooks from sources you trust
+- **OAuth authentication**: Uses secure OAuth 1.0a for Twitter authentication
+
+### What You Should Know
+- Hooks execute automatically after each Claude Code session
+- The script only reads Claude Code's own usage log files
+- You can uninstall at any time by running the reset command
+- All source code is available for inspection in this repository
+
+## Uninstalling
+
+### Complete Removal
+The `reset` command provides a comprehensive uninstall process:
+
+```bash
+npx claude-code-leaderboard reset
+```
+
+This command will:
+1. Remove all local CLAUDE COUNT files and settings
+2. Unregister the hook from Claude Code
+3. **Optionally**: Delete your account from the leaderboard database
+
+### Account Deletion
+If you're authenticated, the reset command will offer to permanently delete your account from the leaderboard. This includes:
+- Your user account and all authentication data
+- Complete token usage history
+- Your position on the leaderboard
+
+⚠️ **Warning**: Account deletion is permanent and cannot be undone. You'll need to type your Twitter handle to confirm this action.
 
 ## Development
 
@@ -58,43 +153,18 @@ The CLI automatically creates and manages `~/.claude/leaderboard.json` with your
 # Install dependencies
 npm install
 
-# Run locally
-npm run dev
-
-# Test the CLI
+# Test the CLI locally
 node bin/cli.js --help
 ```
 
-## Environment Variables
-
-### Optional
-- `ENCRYPTION_KEY`: Key for encrypting stored tokens (default provided)
-- `API_BASE_URL`: Backend API URL (default: https://codebrag.example.com)
-
 ## Support
 
-If you encounter issues, please check:
-- Your internet connection
-- Backend API is running
-- Twitter app configuration is correct
-- Claude Code hook system is properly configured
+For issues or questions:
+- Check that Claude Code is properly installed
+- Verify your Twitter authentication
+- Ensure Node.js 16+ is installed
+- Check network connectivity
 
-## How It Works
+## Contributing
 
-1. **Automatic Setup**: On first run, Codebrag automatically installs a token counting hook
-2. **Token Tracking**: Every time you use Claude Code, your usage is tracked
-3. **Authentication**: Link your Twitter account to join the leaderboard
-4. **Real-time Updates**: Your stats update automatically after each Claude Code session
-
-The hook is installed to:
-- `~/.claude/count_tokens.js` - The counting script
-- `~/.claude/settings.toml` & `settings.json` - Hook configuration
-- `~/.claude/leaderboard.json` - Your authentication data
-
-## OAuth 1.0a Authentication
-
-This CLI uses Twitter OAuth 1.0a authentication which provides:
-- **Seamless login**: If you're already logged into Twitter, you skip directly to authorization
-- **No expiration**: Tokens are valid indefinitely (until revoked)
-- **Better for CLI tools**: No need to refresh tokens
-- **Simple setup**: Just need consumer key and secret from Twitter Developer Portal
+This is an open source project! Contributions are welcome.

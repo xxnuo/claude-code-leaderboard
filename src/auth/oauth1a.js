@@ -2,8 +2,10 @@ import open from 'open';
 import express from 'express';
 import chalk from 'chalk';
 import { apiFetch } from '../utils/api.js';
+import { scanAllHistoricalUsage } from '../utils/usage-scanner.js';
+import ora from 'ora';
 
-const REDIRECT_URI = 'http://localhost:3000/callback';
+const REDIRECT_URI = 'http://localhost:7632/callback';
 
 // Start OAuth 1.0a flow using backend endpoints
 export async function startOAuth1aFlow() {
@@ -93,6 +95,92 @@ export async function startOAuth1aFlow() {
         clearTimeout(timeout);
         server.close();
         
+        if (authData.magic_link) {
+          console.log();
+          console.log(chalk.green('✓ Authenticated as @' + authData.user.twitter_username));
+          
+          // Sync historical usage if this is a new user
+          if (!authData.user.history_sync_completed) {
+            console.log();
+            console.log(chalk.blue('📊 Checking if historical sync is needed...'));
+            
+            try {
+              // First, double-check with the backend if sync is really needed
+              // This prevents expensive local scanning if user is already synced
+              const checkResponse = await apiFetch(`/api/user/stats?twitter_user_id=${authData.user.twitter_user_id}`, {
+                headers: {
+                  'X-OAuth-Token': authData.user.oauth_token,
+                  'X-OAuth-Token-Secret': authData.user.oauth_token_secret
+                }
+              });
+              
+              if (checkResponse.ok) {
+                const userData = await checkResponse.json();
+                // If user already has significant token usage, skip sync
+                if (userData.stats && userData.stats.total_tokens > 0) {
+                  console.log(chalk.yellow('✓ Historical data already synced'));
+                } else {
+                  // Proceed with sync only if user has no token data
+                  console.log(chalk.blue('📊 No existing token data found. Scanning for historical Claude usage...'));
+                  
+                  const { entries, totals } = await scanAllHistoricalUsage(true);
+                  
+                  if (entries.length > 0) {
+                    const syncSpinner = ora('Uploading historical data... Just a moment! Youll see your spot on the leaderboard soon!').start();
+                    
+                    // Send historical data to API
+                    const syncResponse = await apiFetch('/api/usage/sync-history', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        twitter_user_id: authData.user.twitter_user_id,
+                        usage_entries: entries
+                      })
+                    });
+                    
+                    if (!syncResponse.ok) {
+                      const errorText = await syncResponse.text();
+                      // Check if it's a "already synced" error
+                      if (errorText.includes('already synced')) {
+                        syncSpinner.succeed('Historical data already synced');
+                      } else {
+                        syncSpinner.fail('Failed to sync historical data');
+                        console.error(chalk.red('Error syncing historical data:', errorText));
+                      }
+                    } else {
+                      const result = await syncResponse.json();
+                      syncSpinner.succeed(`Synced ${chalk.cyan(entries.length.toLocaleString())} historical usage entries`);
+                      if (result.rank) {
+                        console.log(chalk.green(`🏆 You're ranked #${chalk.cyan(result.rank)} on the leaderboard!`));
+                      }
+                    }
+                  } else {
+                    console.log(chalk.gray('No historical usage data found'));
+                  }
+                }
+              } else {
+                // If check fails, still don't scan immediately - just log error
+                console.error(chalk.red('Unable to verify sync status with server'));
+                console.log(chalk.yellow('Historical sync skipped. You can run "npx claude-code-leaderboard stats" later to sync your data.'));
+              }
+            } catch (error) {
+              console.error(chalk.red('Error during historical sync:', error.message));
+              // Don't fail auth if historical sync fails
+            }
+          } else {
+            console.log(chalk.green('✓ Historical data already synced'));
+          }
+          
+          console.log();
+          console.log(chalk.green('✓ Opening claudecount.com...'));
+          console.log();
+          
+          // Open the magic link in browser
+          open(authData.magic_link).catch((err) => {
+            console.log(chalk.yellow('⚠️ Could not open browser automatically'));
+            console.log(chalk.gray('Visit: ' + authData.magic_link));
+          });
+        }
+        
         resolve({
           success: true,
           oauth_token: authData.user.oauth_token,
@@ -100,7 +188,8 @@ export async function startOAuth1aFlow() {
           userId: authData.user.twitter_user_id,
           username: authData.user.twitter_username,
           displayName: authData.user.twitter_display_name,
-          oauthVersion: '1.0a'
+          oauthVersion: '1.0a',
+          magicLink: authData.magic_link
         });
         
       } catch (error) {
@@ -121,7 +210,7 @@ export async function startOAuth1aFlow() {
     });
     
     // Start server
-    server = app.listen(3000, async (err) => {
+    server = app.listen(7632, async (err) => {
       if (err) {
         clearTimeout(timeout);
         return reject(err);
@@ -141,7 +230,7 @@ export async function startOAuth1aFlow() {
         const { auth_url, request_token } = await requestResponse.json();
         requestToken = request_token;
         
-        console.log(chalk.blue('🌐 Starting local server on port 3000...'));
+        console.log(chalk.blue('🌐 Starting local server on port 7632...'));
         console.log(chalk.yellow('📱 Opening browser for Twitter authentication...'));
         console.log();
         console.log(chalk.gray('If your browser doesn\'t open automatically, visit:'));
