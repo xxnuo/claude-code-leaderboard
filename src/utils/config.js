@@ -9,6 +9,7 @@ const CONFIG_FILE = join(CLAUDE_DIR, 'leaderboard.json');
 const HOOK_SCRIPT_PATH = join(CLAUDE_DIR, 'count_tokens.js');
 const SETTINGS_JSON_PATH = join(CLAUDE_DIR, 'settings.json');
 const ENCRYPTION_KEY_PATH = join(CLAUDE_DIR, '.encryption_key');
+const SUBMITTED_FILE = join(CLAUDE_DIR, 'leaderboard_submitted.json');
 
 export async function ensureConfigDir() {
   if (!existsSync(CLAUDE_DIR)) {
@@ -128,7 +129,8 @@ export async function removeAllClaudeCountFiles() {
     leaderboardConfig: false,
     hookScript: false,
     settingsJson: false,
-    encryptionKey: false
+    encryptionKey: false,
+    submittedFile: false
   };
   
   // Remove leaderboard.json
@@ -161,6 +163,16 @@ export async function removeAllClaudeCountFiles() {
       results.encryptionKey = true;
     } catch (error) {
       console.error('Error removing .encryption_key:', error);
+    }
+  }
+  
+  // Remove leaderboard_submitted.json
+  if (existsSync(SUBMITTED_FILE)) {
+    try {
+      await unlink(SUBMITTED_FILE);
+      results.submittedFile = true;
+    } catch (error) {
+      console.error('Error removing leaderboard_submitted.json:', error);
     }
   }
   

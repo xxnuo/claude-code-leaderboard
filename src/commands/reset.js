@@ -14,6 +14,7 @@ export async function resetCommand(options = {}) {
   console.log(chalk.gray('   • ~/.claude/leaderboard.json (configuration & auth)'));
   console.log(chalk.gray('   • ~/.claude/count_tokens.js (token tracking hook)'));
   console.log(chalk.gray('   • ~/.claude/.encryption_key (token encryption key)'));
+  console.log(chalk.gray('   • ~/.claude/leaderboard_submitted.json (submission tracking)'));
   console.log(chalk.gray('   • Hook configurations from Claude Code settings'));
   
   if (authStatus.isAuthenticated) {
@@ -146,6 +147,11 @@ export async function resetCommand(options = {}) {
         console.log(chalk.green('  ✓ Removed ~/.claude/.encryption_key'));
       } else {
         console.log(chalk.gray('  - ~/.claude/.encryption_key (not found)'));
+      }
+      if (results.submittedFile) {
+        console.log(chalk.green('  ✓ Removed ~/.claude/leaderboard_submitted.json'));
+      } else {
+        console.log(chalk.gray('  - ~/.claude/leaderboard_submitted.json (not found)'));
       }
     }
   } catch (error) {
