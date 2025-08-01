@@ -56,7 +56,14 @@ function getClaudePaths() {
 function createUniqueHash(data) {
   const requestId = data.requestId;
   const messageId = data.message?.id;
-  return requestId || messageId || null;
+  
+  // Match ccusage behavior: require BOTH messageId AND requestId
+  if (requestId && messageId) {
+    return `${messageId}:${requestId}`;
+  }
+  
+  // Return null if either is missing - these entries won't be deduplicated
+  return null;
 }
 
 function parseUsageFromLine(line) {
@@ -98,15 +105,16 @@ async function scanJsonlFile(filePath, seenInteractions) {
       const usageData = parseUsageFromLine(line);
       if (!usageData) continue;
       
-      // Skip if we've seen this interaction before
+      // Match ccusage: only deduplicate if we have a valid hash (both IDs present)
       const uniqueHash = usageData.interaction_id;
-      if (uniqueHash && seenInteractions.has(uniqueHash)) {
-        continue;
-      }
-      
       if (uniqueHash) {
+        // We have both messageId and requestId - check for duplicates
+        if (seenInteractions.has(uniqueHash)) {
+          continue; // Skip duplicate
+        }
         seenInteractions.add(uniqueHash);
       }
+      // If no hash (missing messageId or requestId), always include the entry
       
       usageEntries.push(usageData);
     }

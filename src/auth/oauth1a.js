@@ -123,35 +123,34 @@ export async function startOAuth1aFlow() {
                   // Proceed with sync only if user has no token data
                   console.log(chalk.blue('📊 No existing token data found. Scanning for historical Claude usage...'));
                   
-                  const { entries, totals } = await scanAllHistoricalUsage(true);
+                  const { entries } = await scanAllHistoricalUsage(true);
                   
                   if (entries.length > 0) {
-                    const syncSpinner = ora('Uploading historical data... Just a moment! Youll see your spot on the leaderboard soon!').start();
+                    const syncSpinner = ora('Uploading historical data...').start();
                     
-                    // Send historical data to API
-                    const syncResponse = await apiFetch('/api/usage/sync-history', {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        twitter_user_id: authData.user.twitter_user_id,
-                        usage_entries: entries
-                      })
+                    // Use the original working bulk uploader
+                    const { uploadShardedNdjson } = await import('../utils/bulk-uploader.js');
+                    
+                    // Convert entries to NDJSON lines
+                    const lines = entries.map(e => JSON.stringify({
+                      timestamp: e.timestamp,
+                      tokens: e.tokens,
+                      model: e.model,
+                      interaction_id: e.interaction_id
+                    }));
+                    
+                    const { processed, failed } = await uploadShardedNdjson({ 
+                      lines,
+                      endpointPath: '/api/usage/bulk-import-optimized',
+                      tokens: {
+                        oauth_token: authData.user.oauth_token,
+                        oauth_token_secret: authData.user.oauth_token_secret
+                      }
                     });
-                    
-                    if (!syncResponse.ok) {
-                      const errorText = await syncResponse.text();
-                      // Check if it's a "already synced" error
-                      if (errorText.includes('already synced')) {
-                        syncSpinner.succeed('Historical data already synced');
-                      } else {
-                        syncSpinner.fail('Failed to sync historical data');
-                        console.error(chalk.red('Error syncing historical data:', errorText));
-                      }
+                    if (failed > 0) {
+                      syncSpinner.warn(`Synced ${processed.toLocaleString()} entries (${failed} failed)`);
                     } else {
-                      const result = await syncResponse.json();
-                      syncSpinner.succeed(`Synced ${chalk.cyan(entries.length.toLocaleString())} historical usage entries`);
-                      if (result.rank) {
-                        console.log(chalk.green(`🏆 You're ranked #${chalk.cyan(result.rank)} on the leaderboard!`));
-                      }
+                      syncSpinner.succeed(`Synced ${entries.length.toLocaleString()} historical usage entries`);
                     }
                   } else {
                     console.log(chalk.gray('No historical usage data found'));
