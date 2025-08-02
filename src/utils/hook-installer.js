@@ -1,5 +1,5 @@
-import { readFile, writeFile, mkdir, chmod, access } from 'fs/promises';
-import { constants, existsSync } from 'fs';
+import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -26,18 +26,6 @@ async function ensureClaudeDir() {
 }
 
 /**
- * Check if a file is writable
- */
-async function isWritable(filePath) {
-  try {
-    await access(filePath, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Install or update the hook script
  */
 async function installHookScript() {
@@ -51,7 +39,6 @@ async function installHookScript() {
       const existingContent = await readFile(HOOK_SCRIPT_PATH, 'utf-8');
       shouldUpdate = existingContent !== hookContent;
     } catch {
-      // If we can't read it, we should update it
       shouldUpdate = true;
     }
   }
@@ -68,7 +55,6 @@ async function installHookScript() {
   
   return false; // Already up to date
 }
-
 
 /**
  * Update settings.json to include the hook
@@ -196,14 +182,7 @@ export async function isHookInstalled() {
       existsSync(SETTINGS_JSON_PATH) &&
       existsSync(LEADERBOARD_CONFIG_PATH);
     
-    if (!filesExist) {
-      return false;
-    }
-    
-    // Check if hook is executable
-    await access(HOOK_SCRIPT_PATH, constants.X_OK);
-    
-    return true;
+    return filesExist;
   } catch {
     return false;
   }
