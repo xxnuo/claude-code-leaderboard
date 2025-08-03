@@ -11,6 +11,7 @@ import { authCommand } from '../src/commands/auth.js';
 import { resetCommand } from '../src/commands/reset.js';
 import { checkAuthStatus } from '../src/utils/config.js';
 import { ensureHookInstalled } from '../src/utils/hook-installer.js';
+import { checkAndRunMigration } from '../src/utils/migration.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,9 @@ const packageData = JSON.parse(await readFile(packagePath, 'utf-8'));
 
 // Ensure hook is installed before running any commands
 await ensureHookInstalled();
+
+// Check for migration if authenticated
+await checkAndRunMigration();
 
 const program = new Command();
 

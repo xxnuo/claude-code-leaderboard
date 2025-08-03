@@ -9,6 +9,9 @@ import https from 'node:https';
 import http from 'node:http';
 import crypto from 'node:crypto';
 
+// Version constant - must match CLI_VERSION in constants.js
+const CLI_VERSION = '0.2.0';
+
 const USER_HOME_DIR = homedir();
 const XDG_CONFIG_DIR = process.env.XDG_CONFIG_HOME ?? `${USER_HOME_DIR}/.config`;
 const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
@@ -142,7 +145,8 @@ async function sendToAPI(endpoint, payload) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data)
+        'Content-Length': Buffer.byteLength(data),
+        'X-CLI-Version': CLI_VERSION  // Add version header for backend validation
       },
       timeout: 10000 // 10 second timeout
     };
@@ -156,6 +160,16 @@ async function sendToAPI(endpoint, payload) {
         // Accept any 2xx status as success
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ success: true });
+        } else if (res.statusCode === 426) {
+          // Version upgrade required - log error message
+          try {
+            const error = JSON.parse(responseData);
+            console.error(`\n❌ ${error.detail?.message || error.message || 'CLI version outdated'}`);
+            console.error('Please update by running: npx claude-code-leaderboard@latest\n');
+          } catch {
+            console.error('\n❌ CLI version outdated. Please update by running: npx claude-code-leaderboard@latest\n');
+          }
+          reject(new Error('CLI version outdated'));
         } else {
           reject(new Error(`HTTP ${res.statusCode}`));
         }

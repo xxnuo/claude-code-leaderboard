@@ -3,6 +3,7 @@ import inquirer from 'inquirer';
 import { loadConfig, saveConfig, checkAuthStatus } from '../utils/config.js';
 import { startOAuth1aFlow } from '../auth/oauth1a.js';
 import { storeOAuth1aTokens } from '../auth/tokens.js';
+import { runMigration } from '../utils/migration.js';
 
 export async function authCommand() {
   console.log(chalk.blue('🔐 Twitter Authentication'));
@@ -58,6 +59,9 @@ export async function authCommand() {
       console.log(chalk.green('✅ Authentication successful!'));
       console.log(chalk.green(`👋 Welcome ${chalk.cyan(authResult.displayName)} (${chalk.cyan(authResult.username)})!`));
       console.log(chalk.gray('Your usage will now be tracked and added to the leaderboard.'));
+      
+      // Mark migration as complete for new users (OAuth flow handles bulk import)
+      await runMigration(true);
       
     } else {
       throw new Error(authResult.error || 'Authentication failed');
