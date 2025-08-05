@@ -12,6 +12,7 @@ const CLAUDE_DIR = join(homedir(), '.claude');
 const HOOK_SCRIPT_PATH = join(CLAUDE_DIR, 'count_tokens.js');
 const SETTINGS_JSON_PATH = join(CLAUDE_DIR, 'settings.json');
 const LEADERBOARD_CONFIG_PATH = join(CLAUDE_DIR, 'leaderboard.json');
+const PACKAGE_JSON_PATH = join(CLAUDE_DIR, 'package.json');
 
 // Get the bundled hook script path
 const BUNDLED_HOOK_PATH = join(__dirname, '..', '..', 'hooks', 'count_tokens.js');
@@ -125,12 +126,50 @@ async function createLeaderboardConfig() {
 }
 
 /**
+ * Ensure package.json exists to treat .js files as ES modules
+ */
+async function ensurePackageJson() {
+  if (!existsSync(PACKAGE_JSON_PATH)) {
+    const packageJson = {
+      type: "module"
+    };
+    
+    await writeFile(PACKAGE_JSON_PATH, JSON.stringify(packageJson, null, 2), 'utf-8');
+    return true; // Created
+  }
+  
+  // Check if existing package.json has "type": "module"
+  try {
+    const content = await readFile(PACKAGE_JSON_PATH, 'utf-8');
+    const pkg = JSON.parse(content);
+    
+    if (pkg.type !== 'module') {
+      pkg.type = 'module';
+      await writeFile(PACKAGE_JSON_PATH, JSON.stringify(pkg, null, 2), 'utf-8');
+      return true; // Updated
+    }
+  } catch {
+    // If we can't parse it, overwrite with minimal package.json
+    const packageJson = {
+      type: "module"
+    };
+    await writeFile(PACKAGE_JSON_PATH, JSON.stringify(packageJson, null, 2), 'utf-8');
+    return true; // Recreated
+  }
+  
+  return false; // Already configured
+}
+
+/**
  * Main function to ensure hook is installed
  */
 export async function ensureHookInstalled() {
   try {
     // Ensure Claude directory exists
     await ensureClaudeDir();
+    
+    // Ensure package.json exists for ES module support
+    await ensurePackageJson();
     
     // Track what was updated
     const updates = {
