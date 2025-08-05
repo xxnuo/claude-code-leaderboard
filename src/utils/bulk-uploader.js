@@ -26,7 +26,7 @@ async function uploadBatch({ batch, url, lib, agent, authTokens, batchNumber, to
   const RETRY_DELAY = 1000; // Start with 1 second
   
   try {
-    console.log(`[Batch ${batchNumber}/${totalBatches}] Uploading ${batch.length} entries...`);
+    // Upload batch
     
     const body = JSON.stringify({ entries: batch });
     const gzip = createGzip({ level: 6 });
@@ -76,18 +76,16 @@ async function uploadBatch({ batch, url, lib, agent, authTokens, batchNumber, to
       readable.pipe(gzip).pipe(req);
     });
     
-    console.log(`[Batch ${batchNumber}/${totalBatches}] ✓ Processed: ${result.processed}, Failed: ${result.failed}`);
     return result;
     
   } catch (error) {
     if (retryCount < MAX_RETRIES) {
       const delay = RETRY_DELAY * Math.pow(2, retryCount); // Exponential backoff
-      console.log(`[Batch ${batchNumber}/${totalBatches}] ⚠ Failed, retrying in ${delay}ms... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return uploadBatch({ batch, url, lib, agent, authTokens, batchNumber, totalBatches, retryCount: retryCount + 1 });
     }
     
-    console.error(`[Batch ${batchNumber}/${totalBatches}] ✗ Failed after ${MAX_RETRIES} retries: ${error.message}`);
+    // Failed after all retries
     return { processed: 0, failed: batch.length, batchNumber, error: error.message };
   }
 }
@@ -101,6 +99,10 @@ export async function uploadShardedNdjson({ lines, tokens = null }) {
   
   // Use provided tokens or get from storage
   const authTokens = tokens || await getValidAccessToken();
+  
+  if (!authTokens) {
+    throw new Error('No authentication tokens available');
+  }
   
   // Convert lines to entries format
   const entries = lines.map(line => {
@@ -124,7 +126,7 @@ export async function uploadShardedNdjson({ lines, tokens = null }) {
     entriesByDate[date].push(entry);
   }
   
-  console.log(`Grouped ${entries.length} entries across ${Object.keys(entriesByDate).length} dates`);
+  // Group entries across dates
   
   // Create date-based batches (each batch contains complete days)
   const BATCH_SIZE = 5000; // Max entries per batch
@@ -173,17 +175,13 @@ export async function uploadShardedNdjson({ lines, tokens = null }) {
   }
   
   const totalBatches = batches.length;
-  console.log(`Starting smart parallel upload of ${entries.length} entries in ${totalBatches} date-grouped batches (${MAX_CONCURRENT} concurrent)...`);
   
   // Process batches with controlled concurrency
   const results = [];
   for (let i = 0; i < batches.length; i += MAX_CONCURRENT) {
     const concurrentBatches = batches.slice(i, i + MAX_CONCURRENT);
     
-    // Show which dates are being processed
-    for (const batch of concurrentBatches) {
-      console.log(`[Batch ${batch.batchNumber}/${totalBatches}] Processing dates: ${batch.dates.join(', ')} (${batch.batch.length} entries)`);
-    }
+    // Process batches silently
     
     // Upload multiple batches in parallel
     const batchPromises = concurrentBatches.map(({ batch, batchNumber }) =>
@@ -198,14 +196,12 @@ export async function uploadShardedNdjson({ lines, tokens = null }) {
         results.push(result.value);
       } else {
         // This shouldn't happen since uploadBatch handles its own errors
-        console.error('Unexpected batch failure:', result.reason);
+        // Unexpected batch failure
         results.push({ processed: 0, failed: BATCH_SIZE, error: result.reason });
       }
     }
     
-    // Progress update
-    const completedBatches = Math.min(i + MAX_CONCURRENT, batches.length);
-    console.log(`Progress: ${completedBatches}/${totalBatches} batches completed`);
+    // Continue processing
   }
   
   // Calculate totals
@@ -217,7 +213,7 @@ export async function uploadShardedNdjson({ lines, tokens = null }) {
     totalFailed += result.failed || 0;
   }
   
-  console.log(`\n✓ Upload complete: ${totalProcessed} processed, ${totalFailed} failed`);
+  // Upload complete
   
   return { processed: totalProcessed, failed: totalFailed };
 }

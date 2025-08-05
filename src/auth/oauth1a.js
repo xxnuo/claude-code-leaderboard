@@ -60,7 +60,6 @@ export async function startOAuth1aFlow() {
         }
         
         // Verify with backend
-        console.log(chalk.blue('🔐 Verifying with backend...'));
         
         const verifyResponse = await apiFetch('/api/auth/oauth/verify', {
           method: 'POST',
@@ -96,13 +95,9 @@ export async function startOAuth1aFlow() {
         server.close();
         
         if (authData.magic_link) {
-          console.log();
-          console.log(chalk.green('✓ Authenticated as @' + authData.user.twitter_username));
           
           // Sync historical usage if this is a new user
           if (!authData.user.history_sync_completed) {
-            console.log();
-            console.log(chalk.blue('📊 Checking if historical sync is needed...'));
             
             try {
               // First, double-check with the backend if sync is really needed
@@ -117,11 +112,8 @@ export async function startOAuth1aFlow() {
               if (checkResponse.ok) {
                 const userData = await checkResponse.json();
                 // If user already has significant token usage, skip sync
-                if (userData.stats && userData.stats.total_tokens > 0) {
-                  console.log(chalk.yellow('✓ Historical data already synced'));
-                } else {
+                if (!userData.stats || userData.stats.total_tokens === 0) {
                   // Proceed with sync only if user has no token data
-                  console.log(chalk.blue('📊 No existing token data found. Scanning for historical Claude usage...'));
                   
                   const { entries } = await scanAllHistoricalUsage(true);
                   
@@ -152,26 +144,15 @@ export async function startOAuth1aFlow() {
                     } else {
                       syncSpinner.succeed(`Synced ${entries.length.toLocaleString()} historical usage entries`);
                     }
-                  } else {
-                    console.log(chalk.gray('No historical usage data found'));
                   }
                 }
-              } else {
-                // If check fails, still don't scan immediately - just log error
-                console.error(chalk.red('Unable to verify sync status with server'));
-                console.log(chalk.yellow('Historical sync skipped. You can run "npx claude-code-leaderboard stats" later to sync your data.'));
               }
             } catch (error) {
-              console.error(chalk.red('Error during historical sync:', error.message));
               // Don't fail auth if historical sync fails
             }
-          } else {
-            console.log(chalk.green('✓ Historical data already synced'));
           }
           
-          console.log();
-          console.log(chalk.green('✓ Opening claudecount.com...'));
-          console.log();
+          // Opening claudecount.com
           
           // Open the magic link in browser
           open(authData.magic_link).catch((err) => {
@@ -217,8 +198,6 @@ export async function startOAuth1aFlow() {
       
       try {
         // Step 1: Get auth URL from backend
-        console.log(chalk.blue('🔑 Getting authentication URL from server...'));
-        
         const requestResponse = await apiFetch('/api/auth/oauth/request');
         
         if (!requestResponse.ok) {
@@ -229,24 +208,15 @@ export async function startOAuth1aFlow() {
         const { auth_url, request_token } = await requestResponse.json();
         requestToken = request_token;
         
-        console.log(chalk.blue('🌐 Starting local server on port 7632...'));
         console.log(chalk.yellow('📱 Opening browser for Twitter authentication...'));
-        console.log();
         console.log(chalk.gray('If your browser doesn\'t open automatically, visit:'));
         console.log(chalk.cyan(auth_url));
-        console.log();
-        console.log(chalk.green('✨ If you\'re already logged into Twitter,'));
-        console.log(chalk.green('   you\'ll skip directly to the authorization screen!'));
         console.log();
         
         // Open the authenticate URL
         open(auth_url).catch((err) => {
-          console.log(chalk.yellow('⚠️ Could not open browser automatically'));
-          console.log(chalk.gray('Please visit the URL shown above'));
+          // Silent fail
         });
-        
-        console.log();
-        console.log(chalk.yellow('⏳ Waiting for authorization...'));
         
       } catch (error) {
         clearTimeout(timeout);

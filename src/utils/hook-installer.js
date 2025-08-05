@@ -148,21 +148,6 @@ export async function ensureHookInstalled() {
     // Create leaderboard config
     updates.leaderboardConfig = await createLeaderboardConfig();
     
-    // Log installation status
-    const wasUpdated = Object.values(updates).some(v => v);
-    if (wasUpdated) {
-      console.log('✅ Token tracking enabled');
-      
-      // Log what was updated (for debugging)
-      const updatedItems = Object.entries(updates)
-        .filter(([_, updated]) => updated)
-        .map(([item, _]) => item);
-      
-      if (updatedItems.length > 0) {
-        console.debug('Updated:', updatedItems.join(', '));
-      }
-    }
-    
     return updates;
   } catch (error) {
     console.error('⚠️  Warning: Could not install token tracking hook:', error.message);

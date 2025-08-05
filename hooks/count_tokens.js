@@ -159,17 +159,21 @@ async function sendToAPI(endpoint, payload) {
       res.on('end', () => {
         // Accept any 2xx status as success
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve({ success: true });
+          try {
+            resolve(JSON.parse(responseData));
+          } catch {
+            resolve({ success: true });
+          }
         } else if (res.statusCode === 426) {
-          // Version upgrade required - log error message
+          // Version upgrade required - show error and exit with code 2
           try {
             const error = JSON.parse(responseData);
             console.error(`\n❌ ${error.detail?.message || error.message || 'CLI version outdated'}`);
-            console.error('Please update by running: npx claude-code-leaderboard@latest\n');
+            process.exit(2); // Exit code 2 blocks Claude
           } catch {
-            console.error('\n❌ CLI version outdated. Please update by running: npx claude-code-leaderboard@latest\n');
+            console.error('\n❌ CLI version outdated. Run: npx claude-code-leaderboard@latest');
+            process.exit(2); // Exit code 2 blocks Claude
           }
-          reject(new Error('CLI version outdated'));
         } else {
           reject(new Error(`HTTP ${res.statusCode}`));
         }
@@ -215,16 +219,21 @@ async function main() {
       interaction_hash: usageEntry.interaction_hash
     };
     
-    // Send to API
-    const endpoint = `${config.endpoint || 'https://api.claudecount.com'}/api/usage/hook`;
-    await sendToAPI(endpoint, payload);
+    // Send to API endpoint
+    try {
+      const baseEndpoint = config.endpoint || 'https://api.claudecount.com';
+      const endpoint = `${baseEndpoint}/api/usage/hook`;
+      
+      await sendToAPI(endpoint, payload);
+    } catch (apiError) {
+      console.error(`[ERROR] Failed to submit to API: ${apiError.message}`);
+      // Don't save to tracking on failure - will retry next time
+    }
     
-    // Success - exit silently
     process.exit(0);
-  } catch {
-    // Any error - exit silently
-    // Hooks should never interfere with Claude Code operation
-    process.exit(0);
+  } catch (error) {
+    console.error(`[ERROR] Hook failed: ${error.message}`);
+    process.exit(1);
   }
 }
 

@@ -193,8 +193,10 @@ export async function scanAllHistoricalUsage(showProgress = true) {
     
     totals.total = totals.input + totals.output + totals.cache_creation + totals.cache_read;
     
-    if (spinner) {
-      spinner.succeed(`Found ${chalk.cyan(allUsageEntries.length.toLocaleString())} usage entries with ${chalk.cyan(totals.total.toLocaleString())} total tokens`);
+    if (spinner && allUsageEntries.length > 0) {
+      spinner.succeed(`Found ${chalk.cyan(allUsageEntries.length.toLocaleString())} usage entries`);
+    } else if (spinner) {
+      spinner.stop();
     }
     
     return { entries: allUsageEntries, totals };

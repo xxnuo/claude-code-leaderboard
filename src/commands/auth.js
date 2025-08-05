@@ -31,13 +31,7 @@ export async function authCommand() {
     }
   }
   
-  console.log();
-  console.log(chalk.yellow('🔐 Authentication Required'));
-  console.log(chalk.gray('To track your usage and join the leaderboard, you need to authenticate with Twitter.'));
-  console.log();
-  
   try {
-    console.log(chalk.blue('📱 Starting Twitter authentication (OAuth 1.0a)...'));
     
     // Start OAuth 1.0a flow
     const authResult = await startOAuth1aFlow();

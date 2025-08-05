@@ -17,6 +17,10 @@ export async function authenticatedFetch(path, options = {}) {
   // Get valid tokens
   const tokens = await getValidAccessToken();
   
+  if (!tokens) {
+    throw new Error('Not authenticated. Please run "claudecount auth" to authenticate.');
+  }
+  
   // Build full URL
   const url = `${endpoint}${path}`;
   
@@ -37,6 +41,12 @@ export async function authenticatedFetch(path, options = {}) {
   // If we get a 401, authentication failed
   if (response.status === 401) {
     throw new Error('Authentication failed. Please run "claudecount auth" to re-authenticate.');
+  }
+  
+  // If we get a 426, CLI version is outdated
+  if (response.status === 426) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'CLI version outdated. Please update: npm install -g claude-code-leaderboard@latest');
   }
   
   return response;

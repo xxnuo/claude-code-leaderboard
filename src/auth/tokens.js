@@ -141,7 +141,7 @@ export async function getValidAccessToken() {
   const tokens = await getTokens();
   
   if (!tokens) {
-    throw new Error('No tokens available - please authenticate first');
+    return null;
   }
   
   // OAuth 1.0a tokens are always valid (unless revoked)

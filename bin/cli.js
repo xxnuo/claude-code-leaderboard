@@ -43,16 +43,12 @@ program
       const authStatus = await checkAuthStatus();
       
       if (!authStatus.isAuthenticated) {
-        console.log(chalk.yellow('👋 Welcome to CLAUDE COUNT!'));
-        console.log(chalk.yellow('🐦 Let\'s connect your Twitter account...'));
+        console.log(chalk.yellow('👋 Welcome! Let\'s connect your Twitter account...'));
         console.log();
-        
-        // Run authentication flow
-        await authCommand();
-      } else {
-        // Already authenticated - just run auth command to re-auth or show status
-        await authCommand();
       }
+      
+      // Run authentication flow
+      await authCommand();
     } catch (error) {
       console.error(chalk.red('❌ Error:'), error.message);
       process.exit(1);

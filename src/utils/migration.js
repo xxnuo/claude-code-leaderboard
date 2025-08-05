@@ -7,8 +7,9 @@ import chalk from 'chalk';
 import { scanAllHistoricalUsage } from './usage-scanner.js';
 import { uploadShardedNdjson } from './bulk-uploader.js';
 import { getValidAccessToken } from '../auth/tokens.js';
-import { loadConfig } from './config.js';
+import { loadConfig, clearAuthData } from './config.js';
 import { CLI_VERSION } from './constants.js';
+import { authCommand } from '../commands/auth.js';
 
 const MIGRATION_MARKER_PATH = path.join(homedir(), '.claude', 'migration_v2_complete');
 
@@ -49,6 +50,13 @@ async function resetUserData(tokens) {
   
   if (!response.ok) {
     const error = await response.text();
+    
+    // If user doesn't exist (404), they're probably a new user or haven't synced yet
+    // Skip migration in this case
+    if (response.status === 404 && error.includes('User not found')) {
+      throw new Error('USER_NOT_FOUND');
+    }
+    
     throw new Error(`Failed to reset user data: ${error}`);
   }
   
@@ -94,8 +102,18 @@ export async function runMigration(isNewAuth = false) {
     
     // Step 1: Reset backend data
     migrationSpinner.text = 'Resetting backend data...';
-    const resetResult = await resetUserData(tokens);
-    migrationSpinner.succeed(`Backend data reset for ${resetResult.user_id}`);
+    try {
+      const resetResult = await resetUserData(tokens);
+      migrationSpinner.succeed(`Backend data reset for ${resetResult.user_id}`);
+    } catch (error) {
+      if (error.message === 'USER_NOT_FOUND') {
+        // User doesn't exist in backend - clear invalid auth and trigger re-auth
+        migrationSpinner.info('User not found in backend - clearing invalid auth');
+        await clearAuthData();
+        return { success: false, needsAuth: true };
+      }
+      throw error;
+    }
     
     // Step 2: Scan all historical usage
     const scanSpinner = ora('Scanning historical usage...').start();
@@ -152,15 +170,20 @@ export async function runMigration(isNewAuth = false) {
  * Check if user needs migration and prompt if necessary
  */
 export async function checkAndRunMigration() {
-  // Check if authenticated
-  const config = await loadConfig();
-  if (!config.twitterUrl || config.twitterUrl === "@your_handle") {
-    // Not authenticated, skip migration
+  // Check if migration is needed
+  if (await isMigrationComplete()) {
     return;
   }
   
-  // Check if migration is needed
-  if (await isMigrationComplete()) {
+  // Check if authenticated (need OAuth tokens for migration)
+  try {
+    const tokens = await getValidAccessToken();
+    if (!tokens) {
+      // No tokens, skip migration
+      return;
+    }
+  } catch (error) {
+    // Not authenticated or tokens invalid, skip migration
     return;
   }
   
@@ -168,6 +191,13 @@ export async function checkAndRunMigration() {
   console.log();
   console.log(chalk.yellow('📢 A data migration is required for this new version.'));
   const result = await runMigration();
+  
+  // If user needs auth, run auth command directly
+  if (result.needsAuth) {
+    console.log(chalk.yellow('🔐 Re-authentication required...'));
+    await authCommand();
+    return; // Auth command handles migration after successful auth
+  }
   
   if (!result.success && !result.alreadyMigrated) {
     console.error(chalk.red('❌ Migration failed. Some features may not work correctly.'));
