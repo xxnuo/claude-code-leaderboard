@@ -23,7 +23,7 @@ export async function isMigrationComplete() {
 /**
  * Mark migration as complete
  */
-async function markMigrationComplete() {
+export async function markMigrationComplete() {
   await writeFile(MIGRATION_MARKER_PATH, JSON.stringify({
     migrated_at: new Date().toISOString(),
     version: CLI_VERSION
@@ -66,8 +66,9 @@ async function resetUserData(tokens) {
 /**
  * Run the migration process
  * @param {boolean} isNewAuth - True if this is being called right after authentication
+ * @param {boolean} silent - True to run without any output
  */
-export async function runMigration(isNewAuth = false) {
+export async function runMigration(isNewAuth = false, silent = false) {
   // Check if already migrated
   if (await isMigrationComplete()) {
     return { alreadyMigrated: true };
@@ -80,35 +81,38 @@ export async function runMigration(isNewAuth = false) {
     return { alreadyMigrated: true, newUser: true };
   }
   
-  console.log();
-  console.log(chalk.blue('🔄 Important Update Required'));
-  console.log(chalk.gray('━'.repeat(40)));
-  console.log(chalk.yellow('We need to update your data to work with the new CLI version.'));
-  console.log(chalk.gray('This is a one-time process that will:'));
-  console.log(chalk.gray('  1. Reset your backend data'));
-  console.log(chalk.gray('  2. Re-import all your historical usage'));
-  console.log(chalk.gray('  3. Ensure everything is synced correctly'));
-  console.log();
+  // If silent mode, skip all console output
+  if (!silent) {
+    console.log();
+    console.log(chalk.blue('🔄 Important Update Required'));
+    console.log(chalk.gray('━'.repeat(40)));
+    console.log(chalk.yellow('We need to update your data to work with the new CLI version.'));
+    console.log(chalk.gray('This is a one-time process that will:'));
+    console.log(chalk.gray('  1. Reset your backend data'));
+    console.log(chalk.gray('  2. Re-import all your historical usage'));
+    console.log(chalk.gray('  3. Ensure everything is synced correctly'));
+    console.log();
+  }
   
-  const migrationSpinner = ora('Starting migration...').start();
+  const migrationSpinner = silent ? null : ora('Starting migration...').start();
   
   try {
     // Get OAuth tokens
     const tokens = await getValidAccessToken();
     if (!tokens) {
-      migrationSpinner.fail('Not authenticated. Please run auth first.');
+      if (migrationSpinner) migrationSpinner.fail('Not authenticated. Please run auth first.');
       return { success: false, error: 'Not authenticated' };
     }
     
     // Step 1: Reset backend data
-    migrationSpinner.text = 'Resetting backend data...';
+    if (migrationSpinner) migrationSpinner.text = 'Resetting backend data...';
     try {
       const resetResult = await resetUserData(tokens);
-      migrationSpinner.succeed(`Backend data reset for ${resetResult.user_id}`);
+      if (migrationSpinner) migrationSpinner.succeed(`Backend data reset for ${resetResult.user_id}`);
     } catch (error) {
       if (error.message === 'USER_NOT_FOUND') {
         // User doesn't exist in backend - clear invalid auth and trigger re-auth
-        migrationSpinner.info('User not found in backend - clearing invalid auth');
+        if (migrationSpinner) migrationSpinner.info('User not found in backend - clearing invalid auth');
         await clearAuthData();
         return { success: false, needsAuth: true };
       }
@@ -116,19 +120,19 @@ export async function runMigration(isNewAuth = false) {
     }
     
     // Step 2: Scan all historical usage
-    const scanSpinner = ora('Scanning historical usage...').start();
+    const scanSpinner = silent ? null : ora('Scanning historical usage...').start();
     const { entries, totals } = await scanAllHistoricalUsage(false);
     
     if (entries.length === 0) {
-      scanSpinner.info('No historical usage found to import');
+      if (scanSpinner) scanSpinner.info('No historical usage found to import');
       await markMigrationComplete();
       return { success: true, imported: 0 };
     }
     
-    scanSpinner.succeed(`Found ${entries.length.toLocaleString()} usage entries (${totals.total.toLocaleString()} tokens)`);
+    if (scanSpinner) scanSpinner.succeed(`Found ${entries.length.toLocaleString()} usage entries (${totals.total.toLocaleString()} tokens)`);
     
     // Step 3: Bulk upload all data
-    const uploadSpinner = ora('Re-importing all usage data...').start();
+    const uploadSpinner = silent ? null : ora('Re-importing all usage data...').start();
     
     // Convert entries to NDJSON lines for upload
     const lines = entries.map(e => JSON.stringify({
@@ -144,32 +148,35 @@ export async function runMigration(isNewAuth = false) {
     });
     
     if (failed > 0) {
-      uploadSpinner.warn(`Imported ${processed.toLocaleString()} entries (${failed} failed)`);
+      if (uploadSpinner) uploadSpinner.warn(`Imported ${processed.toLocaleString()} entries (${failed} failed)`);
     } else {
-      uploadSpinner.succeed(`Successfully imported ${processed.toLocaleString()} entries`);
+      if (uploadSpinner) uploadSpinner.succeed(`Successfully imported ${processed.toLocaleString()} entries`);
     }
     
     // Step 4: Mark migration as complete
     await markMigrationComplete();
     
-    console.log();
-    console.log(chalk.green('✅ Migration complete!'));
-    console.log(chalk.gray('Your data has been successfully updated to work with the new CLI.'));
-    console.log();
+    if (!silent) {
+      console.log();
+      console.log(chalk.green('✅ Migration complete!'));
+      console.log(chalk.gray('Your data has been successfully updated to work with the new CLI.'));
+      console.log();
+    }
     
     return { success: true, imported: processed, failed };
     
   } catch (error) {
-    migrationSpinner.fail(`Migration failed: ${error.message}`);
-    console.error(chalk.red('Please try again or contact support if the issue persists.'));
+    if (migrationSpinner) migrationSpinner.fail(`Migration failed: ${error.message}`);
+    if (!silent) console.error(chalk.red('Please try again or contact support if the issue persists.'));
     return { success: false, error: error.message };
   }
 }
 
 /**
  * Check if user needs migration and prompt if necessary
+ * @param {boolean} afterAutoReset - True if this is being called after auto-reset
  */
-export async function checkAndRunMigration() {
+export async function checkAndRunMigration(afterAutoReset = false) {
   // Check if migration is needed
   if (await isMigrationComplete()) {
     return;
@@ -187,10 +194,18 @@ export async function checkAndRunMigration() {
     return;
   }
   
+  // If this is after auto-reset, run silently
+  // Auto-reset already handled the data sync
+  if (afterAutoReset) {
+    // Just mark as complete without running again
+    await markMigrationComplete();
+    return;
+  }
+  
   // Run migration
   console.log();
   console.log(chalk.yellow('📢 A data migration is required for this new version.'));
-  const result = await runMigration();
+  const result = await runMigration(false, false);
   
   // If user needs auth, run auth command directly
   if (result.needsAuth) {

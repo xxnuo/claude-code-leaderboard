@@ -12,6 +12,7 @@ import { resetCommand } from '../src/commands/reset.js';
 import { checkAuthStatus } from '../src/utils/config.js';
 import { ensureHookInstalled } from '../src/utils/hook-installer.js';
 import { checkAndRunMigration } from '../src/utils/migration.js';
+import { performSilentReset, shouldPerformReset } from '../src/utils/auto-reset.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,11 +21,21 @@ const __dirname = dirname(__filename);
 const packagePath = join(__dirname, '..', 'package.json');
 const packageData = JSON.parse(await readFile(packagePath, 'utf-8'));
 
+// Perform silent auto-reset for authenticated users
+// This runs BEFORE hook installation to ensure clean state
+let didAutoReset = false;
+if (await shouldPerformReset()) {
+  const resetResult = await performSilentReset();
+  didAutoReset = resetResult.success || resetResult.skipped;
+  // Continue regardless of result - don't interrupt user flow
+}
+
 // Ensure hook is installed before running any commands
 await ensureHookInstalled();
 
 // Check for migration if authenticated
-await checkAndRunMigration();
+// Pass flag to indicate if auto-reset already ran
+await checkAndRunMigration(didAutoReset);
 
 const program = new Command();
 

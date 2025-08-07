@@ -3,6 +3,7 @@ import express from 'express';
 import chalk from 'chalk';
 import { apiFetch } from '../utils/api.js';
 import { scanAllHistoricalUsage } from '../utils/usage-scanner.js';
+import { CLI_VERSION } from '../utils/constants.js';
 import ora from 'ora';
 
 const REDIRECT_URI = 'http://localhost:7632/callback';
@@ -133,7 +134,6 @@ export async function startOAuth1aFlow() {
                     
                     const { processed, failed } = await uploadShardedNdjson({ 
                       lines,
-                      endpointPath: '/api/usage/bulk-import-optimized',
                       tokens: {
                         oauth_token: authData.user.oauth_token,
                         oauth_token_secret: authData.user.oauth_token_secret

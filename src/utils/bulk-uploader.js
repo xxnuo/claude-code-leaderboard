@@ -4,6 +4,7 @@ import http from 'http';
 import https from 'https';
 import { getValidAccessToken } from '../auth/tokens.js';
 import { loadConfig } from './config.js';
+import { CLI_VERSION } from './constants.js';
 
 const AGENTS = {
   http: new http.Agent({ 
@@ -42,7 +43,8 @@ async function uploadBatch({ batch, url, lib, agent, authTokens, batchNumber, to
           'Content-Type': 'application/json',
           'Content-Encoding': 'gzip',
           'X-OAuth-Token': authTokens.oauth_token,
-          'X-OAuth-Token-Secret': authTokens.oauth_token_secret
+          'X-OAuth-Token-Secret': authTokens.oauth_token_secret,
+          'X-CLI-Version': CLI_VERSION
         },
         agent,
         timeout: 120000  // 2 minutes per batch
