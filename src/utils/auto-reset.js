@@ -5,7 +5,6 @@
 
 import ora from 'ora';
 import chalk from 'chalk';
-import { getValidAccessToken } from '../auth/tokens.js';
 import { scanAllHistoricalUsage } from './usage-scanner.js';
 import { uploadShardedNdjson } from './bulk-uploader.js';
 import { loadConfig } from './config.js';
@@ -20,8 +19,17 @@ const MIGRATION_MARKER_PATH = join(homedir(), '.claude', 'migration_v2_complete'
 /**
  * Check with server if migration is needed based on CLI version
  */
-async function checkVersionWithServer(tokens) {
-  const config = await loadConfig();
+async function checkVersionWithServer(config) {
+  // Use the oauth tokens from the config file
+  const tokens = {
+    oauth_token: config.oauth_token,
+    oauth_token_secret: config.oauth_token_secret
+  };
+  
+  if (!tokens.oauth_token || !tokens.oauth_token_secret) {
+    return { needs_migration: false, reason: 'no_auth_tokens' };
+  }
+  
   const base = process.env.API_BASE_URL || config.endpoint || 'https://api.claudecount.com';
   const url = `${base}/api/user/version-check`;
   
@@ -60,8 +68,7 @@ async function checkVersionWithServer(tokens) {
 /**
  * Reset user data on backend
  */
-async function resetUserData(tokens) {
-  const config = await loadConfig();
+async function resetUserData(config, tokens) {
   const base = process.env.API_BASE_URL || config.endpoint || 'https://api.claudecount.com';
   const url = `${base}/api/user/reset`;
   
@@ -111,19 +118,27 @@ async function removeMigrationMarker() {
  */
 export async function performSilentReset() {
   try {
-    // Check for OAuth tokens - if not authenticated, skip
-    const tokens = await getValidAccessToken();
-    if (!tokens) {
+    // Load config which has OAuth tokens
+    const config = await loadConfig();
+    
+    // Check if user has OAuth tokens in config
+    if (!config.oauth_token || !config.oauth_token_secret) {
       return { skipped: true, reason: 'not_authenticated' };
     }
     
-    // Check with server if migration is needed
-    const versionCheck = await checkVersionWithServer(tokens);
+    // Check with server if migration is needed using config
+    const versionCheck = await checkVersionWithServer(config);
     
     if (!versionCheck.needs_migration) {
       // User is already on the correct version, no need to reset
       return { skipped: true, reason: 'already_up_to_date', version: versionCheck.last_synced_version };
     }
+    
+    // Use tokens from config for the rest of the operations
+    const tokens = {
+      oauth_token: config.oauth_token,
+      oauth_token_secret: config.oauth_token_secret
+    };
     
     // Remove migration marker to allow re-running
     await removeMigrationMarker();
@@ -133,7 +148,7 @@ export async function performSilentReset() {
     
     try {
       // Step 1: Reset backend data
-      const resetResult = await resetUserData(tokens);
+      const resetResult = await resetUserData(config, tokens);
       
       if (resetResult.skipped) {
         resetSpinner.stop();
@@ -197,18 +212,15 @@ export async function performSilentReset() {
 
 /**
  * Check if auto-reset should run
- * Returns true if user has auth data
+ * Returns true if user has auth data in config
  */
 export async function shouldPerformReset() {
   try {
-    // Check if user is authenticated
-    const tokens = await getValidAccessToken();
-    if (!tokens) {
-      return false;
-    }
+    // Check if user has OAuth tokens in config file
+    const config = await loadConfig();
     
-    // Return true if authenticated - we'll check version with server
-    return true;
+    // Return true if config has OAuth tokens - we'll check version with server
+    return !!(config.oauth_token && config.oauth_token_secret);
     
   } catch (error) {
     return false;

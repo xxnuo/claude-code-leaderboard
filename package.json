@@ -1,6 +1,6 @@
 {
   "name": "claude-code-leaderboard",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "CLI tool for tracking Claude Code usage and leaderboard participation",
   "bin": {
     "claude-code-leaderboard": "bin/cli.js"

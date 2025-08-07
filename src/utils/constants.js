@@ -13,4 +13,3 @@ const packageData = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
 // CLI version - automatically read from package.json
 export const CLI_VERSION = packageData.version;
-export const MINIMUM_CLI_VERSION = '0.2.3';

@@ -5,12 +5,18 @@ import { startOAuth1aFlow } from '../auth/oauth1a.js';
 import { storeOAuth1aTokens } from '../auth/tokens.js';
 import { runMigration } from '../utils/migration.js';
 
-export async function authCommand() {
+export async function authCommand(options = {}) {
+  // Skip auth flow if already authenticated and not explicitly requested
+  const authStatus = await checkAuthStatus();
+  
+  if (authStatus.isAuthenticated && !options.forceReauth) {
+    // Silently skip - user is already authenticated
+    // The auto-reset flow will handle any necessary migrations
+    return;
+  }
+  
   console.log(chalk.blue('🔐 Twitter Authentication'));
   console.log(chalk.gray('━'.repeat(30)));
-  
-  // Check if already authenticated
-  const authStatus = await checkAuthStatus();
   
   if (authStatus.isAuthenticated) {
     console.log(chalk.green('✅ Already authenticated as'), chalk.cyan(authStatus.twitterHandle));

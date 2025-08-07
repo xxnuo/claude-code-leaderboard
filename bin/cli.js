@@ -47,19 +47,24 @@ program
 // Default command (when no subcommand is specified)
 program
   .action(async () => {
-    console.log(chalk.blue('🚀 CLAUDE COUNT'));
-    console.log(chalk.gray('━'.repeat(40)));
-    
     try {
       const authStatus = await checkAuthStatus();
       
       if (!authStatus.isAuthenticated) {
+        // New user - show welcome and run auth
+        console.log(chalk.blue('🚀 CLAUDE COUNT'));
+        console.log(chalk.gray('━'.repeat(40)));
         console.log(chalk.yellow('👋 Welcome! Let\'s connect your Twitter account...'));
         console.log();
+        await authCommand({ forceReauth: true });
+      } else if (didAutoReset) {
+        // Already authenticated and auto-reset ran
+        console.log(chalk.green('✨ Your usage data has been synced!'));
+        console.log(chalk.gray(`Authenticated as ${authStatus.twitterHandle}`));
+      } else {
+        // Already authenticated, no reset needed
+        console.log(chalk.green(`✅ Ready! Authenticated as ${authStatus.twitterHandle}`));
       }
-      
-      // Run authentication flow
-      await authCommand();
     } catch (error) {
       console.error(chalk.red('❌ Error:'), error.message);
       process.exit(1);
@@ -67,6 +72,19 @@ program
   });
 
 
+
+// Auth command - explicit authentication
+program
+  .command('auth')
+  .description('Authenticate with Twitter')
+  .action(async () => {
+    try {
+      await authCommand({ forceReauth: true });
+    } catch (error) {
+      console.error(chalk.red('❌ Authentication failed:'), error.message);
+      process.exit(1);
+    }
+  });
 
 // Reset command
 program
