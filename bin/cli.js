@@ -9,10 +9,10 @@ import { dirname } from 'path';
 
 import { authCommand } from '../src/commands/auth.js';
 import { resetCommand } from '../src/commands/reset.js';
-import { checkAuthStatus } from '../src/utils/config.js';
+import { checkAuthStatus, loadConfig } from '../src/utils/config.js';
 import { ensureHookInstalled } from '../src/utils/hook-installer.js';
 import { checkAndRunMigration } from '../src/utils/migration.js';
-import { performSilentReset, shouldPerformReset } from '../src/utils/auto-reset.js';
+import { checkNeedsFullReset, performFullReset } from '../src/utils/auto-reset.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,21 +21,33 @@ const __dirname = dirname(__filename);
 const packagePath = join(__dirname, '..', 'package.json');
 const packageData = JSON.parse(await readFile(packagePath, 'utf-8'));
 
-// Perform silent auto-reset for authenticated users
-// This runs BEFORE hook installation to ensure clean state
-let didAutoReset = false;
-if (await shouldPerformReset()) {
-  const resetResult = await performSilentReset();
-  didAutoReset = resetResult.success || resetResult.skipped;
-  // Continue regardless of result - don't interrupt user flow
+// Check if user needs a full reset (delete and re-auth)
+let needsReauth = false;
+const resetCheck = await checkNeedsFullReset();
+
+if (resetCheck.needsReset) {
+  console.log(chalk.yellow('🔄 Account needs to be reset for CLI update...'));
+  
+  const config = await loadConfig();
+  
+  if (resetCheck.clearLocalOnly) {
+    // User doesn't exist in DB, just clear local auth
+    const { clearAuthData } = await import('../src/utils/config.js');
+    await clearAuthData();
+    needsReauth = true;
+  } else {
+    // Delete user and clear local auth
+    await performFullReset(config);
+    needsReauth = true;
+    console.log(chalk.green('✅ Account reset complete'));
+  }
 }
 
 // Ensure hook is installed before running any commands
 await ensureHookInstalled();
 
-// Check for migration if authenticated
-// Pass flag to indicate if auto-reset already ran
-await checkAndRunMigration(didAutoReset);
+// Skip old migration logic - not needed with simplified approach
+// await checkAndRunMigration(false);
 
 const program = new Command();
 
@@ -50,19 +62,19 @@ program
     try {
       const authStatus = await checkAuthStatus();
       
-      if (!authStatus.isAuthenticated) {
-        // New user - show welcome and run auth
+      if (!authStatus.isAuthenticated || needsReauth) {
+        // New user or needs re-auth after reset
         console.log(chalk.blue('🚀 CLAUDE COUNT'));
         console.log(chalk.gray('━'.repeat(40)));
-        console.log(chalk.yellow('👋 Welcome! Let\'s connect your Twitter account...'));
+        if (needsReauth) {
+          console.log(chalk.yellow('👋 Let\'s reconnect your Twitter account...'));
+        } else {
+          console.log(chalk.yellow('👋 Welcome! Let\'s connect your Twitter account...'));
+        }
         console.log();
         await authCommand({ forceReauth: true });
-      } else if (didAutoReset) {
-        // Already authenticated and auto-reset ran
-        console.log(chalk.green('✨ Your usage data has been synced!'));
-        console.log(chalk.gray(`Authenticated as ${authStatus.twitterHandle}`));
       } else {
-        // Already authenticated, no reset needed
+        // Already authenticated and up to date
         console.log(chalk.green(`✅ Ready! Authenticated as ${authStatus.twitterHandle}`));
       }
     } catch (error) {

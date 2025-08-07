@@ -1,45 +1,35 @@
 /**
- * Auto-reset module for seamless data synchronization
- * Automatically resets and re-uploads user data without prompts
+ * Simplified auto-reset module
+ * If user doesn't have a CLI version in the database, delete them and force re-auth
  */
 
-import ora from 'ora';
-import chalk from 'chalk';
-import { scanAllHistoricalUsage } from './usage-scanner.js';
-import { uploadShardedNdjson } from './bulk-uploader.js';
-import { loadConfig } from './config.js';
+import { loadConfig, clearAuthData, removeAllClaudeCountFiles } from './config.js';
 import { CLI_VERSION } from './constants.js';
-import { existsSync } from 'fs';
-import { unlink } from 'fs/promises';
-import { join } from 'path';
-import { homedir } from 'os';
-
-const MIGRATION_MARKER_PATH = join(homedir(), '.claude', 'migration_v2_complete');
 
 /**
- * Check with server if migration is needed based on CLI version
+ * Check if user needs a full reset (delete and re-auth)
+ * Returns true if user exists but has no CLI version or old version
  */
-async function checkVersionWithServer(config) {
-  // Use the oauth tokens from the config file
-  const tokens = {
-    oauth_token: config.oauth_token,
-    oauth_token_secret: config.oauth_token_secret
-  };
-  
-  if (!tokens.oauth_token || !tokens.oauth_token_secret) {
-    return { needs_migration: false, reason: 'no_auth_tokens' };
-  }
-  
-  const base = process.env.API_BASE_URL || config.endpoint || 'https://api.claudecount.com';
-  const url = `${base}/api/user/version-check`;
-  
+export async function checkNeedsFullReset() {
   try {
+    // Check if user has OAuth tokens in config file
+    const config = await loadConfig();
+    
+    if (!config.oauth_token || !config.oauth_token_secret) {
+      // Not authenticated, no reset needed
+      return { needsReset: false, reason: 'not_authenticated' };
+    }
+    
+    // Check with server if user has a CLI version
+    const base = process.env.API_BASE_URL || config.endpoint || 'https://api.claudecount.com';
+    const url = `${base}/api/user/version-check`;
+    
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-OAuth-Token': tokens.oauth_token,
-        'X-OAuth-Token-Secret': tokens.oauth_token_secret,
+        'X-OAuth-Token': config.oauth_token,
+        'X-OAuth-Token-Secret': config.oauth_token_secret,
         'X-CLI-Version': CLI_VERSION
       },
       body: JSON.stringify({
@@ -47,184 +37,87 @@ async function checkVersionWithServer(config) {
       })
     });
     
+    if (response.status === 404) {
+      // User not found - maybe they were deleted, clear local auth
+      return { needsReset: true, reason: 'user_not_found', clearLocalOnly: true };
+    }
+    
     if (!response.ok) {
-      // Only trigger migration for 404 (new user) - other errors should not trigger reset
-      if (response.status === 404) {
-        return { needs_migration: false, reason: 'user_not_found' };
-      }
-      // For other errors, don't trigger migration
+      // Error checking version - don't reset
       console.error(`Version check failed with status ${response.status}`);
-      return { needs_migration: false, reason: 'version_check_failed' };
+      return { needsReset: false, reason: 'version_check_failed' };
     }
     
     const result = await response.json();
-    return result;
+    
+    // If migration is needed, we need a full reset
+    if (result.needs_migration) {
+      return { 
+        needsReset: true, 
+        reason: result.reason,
+        twitterHandle: config.twitterUrl
+      };
+    }
+    
+    return { needsReset: false, reason: 'up_to_date' };
+    
   } catch (error) {
-    // Network errors should not trigger migration - just continue normally
+    // Network errors should not trigger reset
     console.error('Version check error:', error.message);
-    return { needs_migration: false, reason: 'version_check_error' };
+    return { needsReset: false, reason: 'version_check_error' };
   }
 }
 
 /**
- * Reset user data on backend
+ * Delete user from database
  */
-async function resetUserData(config, tokens) {
+export async function deleteUserFromDatabase(config) {
   const base = process.env.API_BASE_URL || config.endpoint || 'https://api.claudecount.com';
-  const url = `${base}/api/user/reset`;
+  const url = `${base}/api/user/delete`;
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-OAuth-Token': tokens.oauth_token,
-      'X-OAuth-Token-Secret': tokens.oauth_token_secret,
-      'X-CLI-Version': CLI_VERSION
-    }
-  });
-  
-  if (!response.ok) {
-    const error = await response.text();
+  try {
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-OAuth-Token': config.oauth_token,
+        'X-OAuth-Token-Secret': config.oauth_token_secret
+      }
+    });
     
-    // If user doesn't exist (404), they're probably a new user
-    // Skip reset in this case
     if (response.status === 404) {
-      return { skipped: true, reason: 'user_not_found' };
+      // User already doesn't exist, that's fine
+      return { success: true, alreadyDeleted: true };
     }
     
-    throw new Error(`Failed to reset user data: ${error}`);
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Failed to delete user:', error);
+      return { success: false, error };
+    }
+    
+    const result = await response.json();
+    return { success: true, result };
+    
+  } catch (error) {
+    console.error('Error deleting user:', error.message);
+    return { success: false, error: error.message };
   }
+}
+
+/**
+ * Perform full reset: delete user from DB and clear local auth
+ */
+export async function performFullReset(config) {
+  // Step 1: Delete user from database (if they exist)
+  const deleteResult = await deleteUserFromDatabase(config);
   
-  return await response.json();
-}
-
-/**
- * Remove migration marker to allow re-running
- */
-async function removeMigrationMarker() {
-  if (existsSync(MIGRATION_MARKER_PATH)) {
-    try {
-      await unlink(MIGRATION_MARKER_PATH);
-      return true;
-    } catch (error) {
-      // Silent fail - not critical
-      return false;
-    }
-  }
-  return false;
-}
-
-/**
- * Perform silent reset and re-upload of all user data
- * This runs automatically without any user prompts
- */
-export async function performSilentReset() {
-  try {
-    // Load config which has OAuth tokens
-    const config = await loadConfig();
-    
-    // Check if user has OAuth tokens in config
-    if (!config.oauth_token || !config.oauth_token_secret) {
-      return { skipped: true, reason: 'not_authenticated' };
-    }
-    
-    // Check with server if migration is needed using config
-    const versionCheck = await checkVersionWithServer(config);
-    
-    if (!versionCheck.needs_migration) {
-      // User is already on the correct version, no need to reset
-      return { skipped: true, reason: 'already_up_to_date', version: versionCheck.last_synced_version };
-    }
-    
-    // Use tokens from config for the rest of the operations
-    const tokens = {
-      oauth_token: config.oauth_token,
-      oauth_token_secret: config.oauth_token_secret
-    };
-    
-    // Remove migration marker to allow re-running
-    await removeMigrationMarker();
-    
-    // Show minimal status (no prompts)
-    const resetSpinner = ora('Syncing your usage data...').start();
-    
-    try {
-      // Step 1: Reset backend data
-      const resetResult = await resetUserData(config, tokens);
-      
-      if (resetResult.skipped) {
-        resetSpinner.stop();
-        return { skipped: true, reason: resetResult.reason };
-      }
-      
-      // Step 2: Scan all historical usage (silent mode)
-      const { entries, totals } = await scanAllHistoricalUsage(false);
-      
-      if (entries.length === 0) {
-        resetSpinner.succeed('No usage data to sync');
-        return { success: true, imported: 0 };
-      }
-      
-      // Step 3: Upload all data
-      resetSpinner.text = `Uploading ${entries.length.toLocaleString()} usage entries...`;
-      
-      // Convert entries to NDJSON lines for upload
-      const lines = entries.map(e => JSON.stringify({
-        timestamp: e.timestamp,
-        tokens: e.tokens,
-        model: e.model,
-        interaction_id: e.interaction_id
-      }));
-      
-      const { processed, failed } = await uploadShardedNdjson({ 
-        lines,
-        tokens
-      });
-      
-      if (failed > 0) {
-        resetSpinner.warn(`Synced ${processed.toLocaleString()} entries (${failed} skipped)`);
-      } else {
-        resetSpinner.succeed(`Successfully synced ${processed.toLocaleString()} usage entries`);
-      }
-      
-      return { 
-        success: true, 
-        imported: processed, 
-        failed,
-        total_tokens: totals.total
-      };
-      
-    } catch (error) {
-      resetSpinner.fail('Sync failed - will retry on next run');
-      // Don't throw - we want to continue with normal flow
-      return { 
-        success: false, 
-        error: error.message 
-      };
-    }
-    
-  } catch (error) {
-    // Silent fail - don't interrupt the user's flow
-    return { 
-      success: false, 
-      error: error.message 
-    };
-  }
-}
-
-/**
- * Check if auto-reset should run
- * Returns true if user has auth data in config
- */
-export async function shouldPerformReset() {
-  try {
-    // Check if user has OAuth tokens in config file
-    const config = await loadConfig();
-    
-    // Return true if config has OAuth tokens - we'll check version with server
-    return !!(config.oauth_token && config.oauth_token_secret);
-    
-  } catch (error) {
-    return false;
-  }
+  // Step 2: Clear local auth data regardless of delete result
+  // This ensures user can re-auth even if delete failed
+  await clearAuthData();
+  
+  return {
+    deleted: deleteResult.success,
+    cleared: true
+  };
 }
