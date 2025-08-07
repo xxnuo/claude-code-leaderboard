@@ -10,7 +10,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 
 // Version constant - must match CLI_VERSION in constants.js
-const CLI_VERSION = '0.2.0';
+const CLI_VERSION = '0.2.5';
 
 const USER_HOME_DIR = homedir();
 const XDG_CONFIG_DIR = process.env.XDG_CONFIG_HOME ?? `${USER_HOME_DIR}/.config`;

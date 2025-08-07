@@ -39,7 +39,8 @@ async function checkVersionWithServer(config) {
       headers: {
         'Content-Type': 'application/json',
         'X-OAuth-Token': tokens.oauth_token,
-        'X-OAuth-Token-Secret': tokens.oauth_token_secret
+        'X-OAuth-Token-Secret': tokens.oauth_token_secret,
+        'X-CLI-Version': CLI_VERSION
       },
       body: JSON.stringify({
         cli_version: CLI_VERSION
@@ -77,7 +78,8 @@ async function resetUserData(config, tokens) {
     headers: {
       'Content-Type': 'application/json',
       'X-OAuth-Token': tokens.oauth_token,
-      'X-OAuth-Token-Secret': tokens.oauth_token_secret
+      'X-OAuth-Token-Secret': tokens.oauth_token_secret,
+      'X-CLI-Version': CLI_VERSION
     }
   });
   
