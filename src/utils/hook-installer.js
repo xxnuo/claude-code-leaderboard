@@ -38,7 +38,21 @@ async function installHookScript() {
   if (existsSync(HOOK_SCRIPT_PATH)) {
     try {
       const existingContent = await readFile(HOOK_SCRIPT_PATH, 'utf-8');
-      shouldUpdate = existingContent !== hookContent;
+      
+      // Extract version from existing hook
+      const versionMatch = existingContent.match(/const CLI_VERSION = ['"]([^'"]+)['"]/);
+      const existingVersion = versionMatch ? versionMatch[1] : null;
+      
+      // Extract version from new hook
+      const newVersionMatch = hookContent.match(/const CLI_VERSION = ['"]([^'"]+)['"]/);
+      const newVersion = newVersionMatch ? newVersionMatch[1] : null;
+      
+      // Force update if versions differ or content is different
+      shouldUpdate = existingVersion !== newVersion || existingContent !== hookContent;
+      
+      if (shouldUpdate && existingVersion && newVersion) {
+        console.log(`Updating hook from v${existingVersion} to v${newVersion}`);
+      }
     } catch {
       shouldUpdate = true;
     }

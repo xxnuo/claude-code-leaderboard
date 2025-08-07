@@ -28,6 +28,13 @@ export async function resetCommand(options = {}) {
   
   let deleteFromDatabase = false;
   
+  // Handle --delete-account flag with --force
+  if (options.force && options.deleteAccount && authStatus.isAuthenticated) {
+    deleteFromDatabase = true;
+    console.log();
+    console.log(chalk.red('🗑️  Will delete account from database (--delete-account flag)'));
+  }
+  
   // Skip confirmation if --force flag is used
   if (!options.force) {
     const { confirm } = await inquirer.prompt([

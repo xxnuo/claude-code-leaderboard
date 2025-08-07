@@ -22,24 +22,29 @@ const packagePath = join(__dirname, '..', 'package.json');
 const packageData = JSON.parse(await readFile(packagePath, 'utf-8'));
 
 // Check if user needs a full reset (delete and re-auth)
+// Skip this check if running the reset command
 let needsReauth = false;
-const resetCheck = await checkNeedsFullReset();
+const isResetCommand = process.argv[2] === 'reset';
 
-if (resetCheck.needsReset) {
-  console.log(chalk.yellow('🔄 Account needs to be reset for CLI update...'));
-  
-  const config = await loadConfig();
-  
-  if (resetCheck.clearLocalOnly) {
-    // User doesn't exist in DB, just clear local auth
-    const { clearAuthData } = await import('../src/utils/config.js');
-    await clearAuthData();
-    needsReauth = true;
-  } else {
-    // Delete user and clear local auth
-    await performFullReset(config);
-    needsReauth = true;
-    console.log(chalk.green('✅ Account reset complete'));
+if (!isResetCommand) {
+  const resetCheck = await checkNeedsFullReset();
+
+  if (resetCheck.needsReset) {
+    console.log(chalk.yellow('🔄 Account needs to be reset for CLI update...'));
+    
+    const config = await loadConfig();
+    
+    if (resetCheck.clearLocalOnly) {
+      // User doesn't exist in DB, just clear local auth
+      const { clearAuthData } = await import('../src/utils/config.js');
+      await clearAuthData();
+      needsReauth = true;
+    } else {
+      // Delete user and clear local auth
+      await performFullReset(config);
+      needsReauth = true;
+      console.log(chalk.green('✅ Account reset complete'));
+    }
   }
 }
 
@@ -103,6 +108,7 @@ program
   .command('reset')
   .description('Reset configuration and clear authentication data')
   .option('-f, --force', 'Skip confirmation prompt')
+  .option('-d, --delete-account', 'Also delete account from database (requires --force or confirmation)')
   .option('-v, --verbose', 'Show detailed information about what was cleared')
   .action(async (options) => {
     try {
