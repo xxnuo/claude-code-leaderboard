@@ -83,7 +83,7 @@ export async function clearAuthData() {
 }
 
 
-async function removeHookFromJson() {
+export async function removeHookFromJson() {
   if (!existsSync(SETTINGS_JSON_PATH)) {
     return false;
   }
