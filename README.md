@@ -1,4 +1,4 @@
-# Hack
+# No.1
 
 ```bash
 git clone https://github.com/xxnuo/claude-code-leaderboard.git
