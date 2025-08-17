@@ -164,6 +164,7 @@ async function main() {
     } catch (apiError) {
       console.error(`❌ 上传失败: ${apiError.message}`);
     }
+    rl.close();
   } catch (error) {
     console.error(`❌ 错误: ${error.message}`);
     rl.close();
