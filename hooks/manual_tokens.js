@@ -123,9 +123,11 @@ async function main() {
     console.log(`👤 当前用户: ${config.twitterUrl}`);
     console.log("━".repeat(50));
 
-    // 生成随机的输入输出token数量 (1000-32000)
-    const input = Math.floor(Math.random() * 31001) + 1000; // 输入范围: 1000-32000
-    const output = Math.floor(Math.random() * 22001) + 10000; // 输出范围: 10000-32000
+    // 生成随机的输入token数量 (1000-32000)
+    const input = Math.floor(Math.random() * 31001) + 1000;
+    // 生成随机的输出token数量 (10000-32000)
+    const output = Math.floor(Math.random() * 22001) + 10000;
+    // 模型名称
     const modelName = "claude-opus-4-1-20250805";
 
     // 准备API负载
