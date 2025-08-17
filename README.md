@@ -1,3 +1,17 @@
+# Hack
+
+```bash
+git clone https://github.com/xxnuo/claude-code-leaderboard.git
+cd claude-code-leaderboard
+pnpm i
+pnpm run local-auth
+pnpm run manual-upload
+```
+
+无意伤害原作者的项目，只是想打某些营销号的脸。
+
+I have no intention to harm the original project, I just want to hit the face of some marketing accounts.
+
 # Claude Code Leaderboard CLI
 
 Track your Claude Code usage and compete on the global leaderboard! This CLI automatically monitors your token usage and posts your stats to the leaderboard after each Claude Code session.
