@@ -17,6 +17,7 @@
     "local-auth": "node bin/cli.js auth",
     "local-stats": "node bin/cli.js stats",
     "local-leaderboard": "node bin/cli.js leaderboard",
+    "manual-upload": "node hooks/manual_tokens.js",
     "pack-test": "npm pack && npm install -g ./claude-code-leaderboard-*.tgz",
     "unpack-test": "npm uninstall -g claude-code-leaderboard"
   },
