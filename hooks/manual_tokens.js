@@ -162,10 +162,10 @@ async function main() {
       // 询问用户要生成多少条记录
       const askForCount = () => {
         return new Promise((resolve) => {
-          rl.question("📊 请输入要生成的记录数量 (1-1000): ", (answer) => {
+          rl.question("📊 请输入要生成的记录数量 (1-100000): ", (answer) => {
             const count = parseInt(answer, 10);
-            if (isNaN(count) || count < 1 || count > 1000) {
-              console.log("❌ 请输入1到1000之间的有效数字。");
+            if (isNaN(count) || count < 1 || count > 100000) {
+              console.log("❌ 请输入1到100000之间的有效数字。");
               resolve(askForCount());
             } else {
               resolve(count);
