@@ -3,9 +3,9 @@
 ```bash
 git clone https://github.com/xxnuo/claude-code-leaderboard.git
 cd claude-code-leaderboard
-pnpm i
-pnpm run local-auth
-pnpm run manual-upload
+npm i
+npm run local-auth
+npm run manual-upload
 ```
 
 无意伤害原作者的项目，只是想打某些营销号的脸。
