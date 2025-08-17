@@ -8,9 +8,9 @@ npm run local-auth
 npm run manual-upload
 ```
 
-无意伤害原作者的项目，只是想打某些营销号的脸。
+无意伤害原作者的项目，只是揭露某些营销号。
 
-I have no intention to harm the original project, I just want to hit the face of some marketing accounts.
+I have no intention to harm the original project, I just want to expose the marketing accounts.
 
 # Claude Code Leaderboard CLI
 
